@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Node
+node_modules/
+
+# Large binary files (GitHub single-file limit is 100MB)
+*.mov
+*.mp4
+*.epub
+
+# Editor cruft
+.vscode/
+.idea/
+*.swp
+
+# Python bytecode (scripts/ is Python)
+__pycache__/
+*.pyc

@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anonymous Avatar — pip v2</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="layout">
+
+    <!-- ═══════════════════════════════════════════
+         LEFT COLUMN (desktop) / BOTTOM (mobile):
+         Options panel — user fills out Q_S, Q_A, Q_B,
+         smile toggle, quote free-text.
+         ═══════════════════════════════════════════ -->
+    <section id="options" aria-label="Choose your avatar">
+      <h1 class="title">make yourself</h1>
+
+      <!-- Q_S: body / sex -->
+      <fieldset class="qblock" data-q="Q_S">
+        <legend>pick a body — which one feels like you today?</legend>
+        <div class="choices" id="opts-sex">
+          <label class="choice">
+            <input type="radio" name="sex" value="male" checked>
+            <span>male</span>
+          </label>
+          <label class="choice">
+            <input type="radio" name="sex" value="female">
+            <span>female</span>
+          </label>
+        </div>
+      </fieldset>
+
+      <!-- Q_AVATAR: v6 — visual gallery replacing Q_LOOK + Q_POSE.
+           Renders 15 sprite thumbnails for the current sex (5 × 3).
+           Tile click sets state.color AND state.num atomically. -->
+      <fieldset class="qblock" data-q="Q_AVATAR">
+        <legend id="legend-avatar">which avatar feels like you today?</legend>
+        <div class="avatar-gallery" id="opts-avatar" role="radiogroup" aria-labelledby="legend-avatar">
+          <!-- populated by app.js: 15 .avatar-tile buttons -->
+        </div>
+      </fieldset>
+
+      <!-- Q_SMILE: independent smile dimension — completes the 60-variant matrix -->
+      <fieldset class="qblock" data-q="Q_SMILE">
+        <legend>smile?</legend>
+        <div class="choices" id="opts-smile">
+          <!-- populated by app.js from questions.json Q_SMILE -->
+        </div>
+      </fieldset>
+
+      <!-- Q_MOOD: vibe tag (no longer drives animation tempo or smile in v5) -->
+      <fieldset class="qblock" data-q="Q_MOOD">
+        <legend>how do you feel right now?</legend>
+        <div class="choices" id="opts-mood">
+          <!-- populated by app.js from questions.json Q_MOOD -->
+        </div>
+      </fieldset>
+
+      <!-- Q_ENERGY: background energy level slider -->
+      <fieldset class="qblock" data-q="Q_ENERGY">
+        <legend>what's your energy level?</legend>
+        <div class="slider-row">
+          <input type="range" id="slider-energy" min="0" max="5" step="1" value="2">
+          <span class="slider-label" id="slider-energy-label">medium</span>
+        </div>
+      </fieldset>
+
+      <!-- Q_QUOTE: free text -->
+      <fieldset class="qblock" data-q="Q_QUOTE">
+        <legend>what are you thinking?</legend>
+        <input type="text" id="input-quote" maxlength="28"
+               placeholder="28 chars, ASCII only"
+               autocomplete="off">
+        <div class="suggestions" id="quote-suggestions">
+          <!-- populated by app.js -->
+        </div>
+      </fieldset>
+
+      <!-- attribution -->
+      <footer class="attribution">
+        Sprites by The Pudding (Alvin Chang), MIT License.<br>
+        See <a href="https://github.com/hancyhxy/anonymous-connection/blob/main/version2/design.md">how it works</a>.
+      </footer>
+    </section>
+
+    <!-- ═══════════════════════════════════════════
+         RIGHT COLUMN (desktop) / TOP (mobile):
+         Live preview of the avatar, rendered directly
+         from sprites.json.
+         ═══════════════════════════════════════════ -->
+    <section id="preview" aria-label="Live avatar preview">
+
+      <div id="preview-frame">
+        <!-- quote bubble (hidden when empty) -->
+        <div class="quote-bubble" id="quote-bubble" hidden>
+          <span class="quote-text" id="quote-text"></span>
+          <span class="quote-tail">▼</span>
+        </div>
+
+        <!-- the avatar itself -->
+        <div class="asciiContainer" id="avatar-container">
+          <pre id="avatar-pre">loading sprites…</pre>
+        </div>
+      </div>
+
+      <div class="sprite-meta">
+        <code id="sprite-key">—</code>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- ═══════════════════════════════════════════
+       STATUS BAR — bottom edge, always visible.
+       Shows Web Serial connect state + last-sync info.
+       ═══════════════════════════════════════════ -->
+  <div class="status-bar" id="status-bar">
+    <button id="btn-connect" type="button">Connect Device</button>
+    <span class="status-text" id="status-text">device not connected</span>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+<!-- Slide: User Journey Map -->
+<!-- This slide indexes journey_map.html via iframe.
+     The standalone file is the single source of truth — do NOT duplicate content here.
+     To edit the journey map, edit journey_map.html; this slide will update automatically. -->
+<section class="slide-journey-map">
+  <style>
+    .slide-journey-map {
+      width: 1920px; height: 1080px;
+      box-sizing: border-box;
+      background: #f5f2ee;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* The iframe renders the standalone page at a larger native size, then
+       scales down to fit 1920x1080. A wider native canvas gives the journey
+       map table more horizontal room per column, which means fewer line-wraps
+       per cell, which means the table fits vertically without cropping
+       Touchpoints / Opportunities. */
+    .slide-journey-map .ujm-iframe-wrapper {
+      position: absolute;
+      top: 0; left: 0;
+      width: 4000px;   /* native render width (wider = more columns breathing room) */
+      height: 2250px;  /* native render height, keeps 16:9 ratio */
+      transform-origin: top left;
+      transform: scale(0.48);  /* 4000 * 0.48 = 1920, 2250 * 0.48 = 1080 */
+    }
+
+    .slide-journey-map iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      display: block;
+    }
+  </style>
+
+  <div class="ujm-iframe-wrapper">
+    <iframe src="journey_map.html" title="User Journey Map"></iframe>
+  </div>
+</section>

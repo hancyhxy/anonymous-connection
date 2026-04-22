@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Hello Stranger — Process</title>
+  <link rel="stylesheet" href="shell.css">
+</head>
+<body>
+
+  <!-- 16:9 stage; canvas inside is fixed 1920x1080 and scaled via JS -->
+  <div class="stage">
+    <div class="stage-inner">
+      <!-- slide fragments are injected here by script.js -->
+    </div>
+  </div>
+
+  <!-- Table of contents overlay -->
+  <div class="toc">
+    <div class="toc-panel">
+      <h2>SLIDES</h2>
+      <ol class="toc-list"></ol>
+      <div class="toc-footer">Click a slide to jump · Esc to close</div>
+    </div>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>

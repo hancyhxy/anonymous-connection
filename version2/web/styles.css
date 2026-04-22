@@ -1,0 +1,431 @@
+/* =============================================================
+   pip v2 — Anonymous Avatar web UI
+   Visual language inherits hello-stranger (MIT, The Pudding 2022).
+   .asciiContainer block is ported from The Pudding — Hello, Stranger
+   (https://pudding.cool/2025/06/hello-stranger/, MIT 2022),
+   originally at src/components/hellostranger/HelloStranger.person.svelte
+   lines 332-358.
+   ============================================================= */
+
+:root {
+  --bg-page:       #1a1a1e;
+  --bg-panel:      #222228;
+  --bg-preview:    #2a2a30;
+  --text-primary:  #e8e8ec;
+  --text-muted:    #888892;
+  --accent:        #7ec8e3;
+  --border:        #3a3a42;
+
+  /* Live values — overwritten by renderer.js per profile */
+  --person-color:      #c9c1af;   /* derived from mood */
+  --background-color:  #d0caa4;   /* from energy palette */
+  --bg-color-soft:     #f0e8c8;   /* lightenColor(backgroundColor) */
+  --darker-color:      #4a3a2a;   /* darkestColor(backgroundColor) */
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+               Roboto, sans-serif;
+  background: var(--bg-page);
+  color: var(--text-primary);
+  line-height: 1.4;
+}
+
+/* ──────────────────────────────────────────────
+   LAYOUT
+   Desktop (> 640px): left options / right preview
+   Mobile (≤ 640px):  stacked, preview on top (sticky)
+   ────────────────────────────────────────────── */
+.layout {
+  display: flex;
+  flex-direction: row;
+  min-height: calc(100vh - 48px);   /* 48px status bar */
+}
+
+#options {
+  flex: 0 0 40%;
+  padding: 32px 28px 64px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+#preview {
+  flex: 0 0 60%;
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: sticky;
+  top: 0;
+  height: calc(100vh - 48px);
+}
+
+@media (max-width: 640px) {
+  .layout {
+    flex-direction: column;
+  }
+  #preview {
+    order: -1;
+    flex: 0 0 auto;
+    height: 50vh;
+    min-height: 360px;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  #options {
+    flex: 1 1 auto;
+    border-right: none;
+    padding: 20px 16px 64px;
+  }
+}
+
+/* ──────────────────────────────────────────────
+   OPTIONS PANEL
+   ────────────────────────────────────────────── */
+.title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 0 0 24px 0;
+  letter-spacing: 0.02em;
+  color: var(--text-primary);
+}
+
+.qblock {
+  border: none;
+  padding: 0;
+  margin: 0 0 28px 0;
+}
+
+.qblock legend {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0;
+}
+
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.choice {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.choice input {
+  appearance: none;
+  -webkit-appearance: none;
+  margin: 0;
+  padding: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+  opacity: 0;
+}
+
+.choice:has(input:checked) {
+  border-color: var(--accent);
+  background: rgba(126, 200, 227, 0.15);
+  color: var(--text-primary);
+}
+
+.choice:hover {
+  border-color: #555;
+}
+
+/* ──────────────────────────────────────────────
+   Q_AVATAR gallery (v6) — 15 sprite thumbnails (5 × 3).
+   Decoupled from --person-color: tiles stay a fixed grey
+   so changing energy doesn't repaint the picker while the
+   user is choosing a shape.
+   ────────────────────────────────────────────── */
+.avatar-gallery {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.avatar-tile {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 4px;
+  cursor: pointer;
+  aspect-ratio: 10 / 11;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  transition: border-color 0.15s, background 0.15s;
+  color: inherit;
+  font: inherit;
+}
+
+.avatar-tile:hover {
+  border-color: #555;
+}
+
+.avatar-tile.selected {
+  border-color: var(--accent);
+  background: rgba(126, 200, 227, 0.15);
+}
+
+.tile-ascii {
+  margin: 0;
+  padding: 0;
+  font-family: "Lucida Console", Monaco, "Courier New", monospace;
+  font-size: 7px;
+  line-height: 0.55em;
+  letter-spacing: -0.1em;
+  font-weight: bold;
+  color: var(--text-primary);
+  white-space: pre;
+  user-select: none;
+  pointer-events: none;
+}
+
+@media (max-width: 380px) {
+  .tile-ascii { font-size: 6px; }
+}
+
+.hint {
+  margin-top: 6px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-style: italic;
+  min-height: 1.2em;
+}
+
+.choice.toggle {
+  gap: 8px;
+}
+
+.choice.toggle input {
+  appearance: auto;
+  -webkit-appearance: auto;
+  width: 16px;
+  height: 16px;
+  position: static;
+  opacity: 1;
+  accent-color: var(--accent);
+}
+
+/* energy slider */
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.slider-row input[type="range"] {
+  flex: 1;
+  accent-color: var(--accent);
+}
+.slider-label {
+  min-width: 70px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* quote input */
+#input-quote {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 0.95rem;
+}
+#input-quote:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.suggestion-chip {
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.suggestion-chip:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.attribution {
+  margin-top: 40px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+.attribution a { color: var(--text-muted); }
+
+/* ──────────────────────────────────────────────
+   PREVIEW PANEL
+   ────────────────────────────────────────────── */
+#preview-frame {
+  position: relative;
+  width: 400px;
+  height: 440px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-color-soft);
+  border: 1px solid var(--darker-color);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: background 0.4s ease;
+}
+
+/* quote bubble, hello-stranger style.
+   Positioned in the upper third so it sits just above the sprite's head,
+   not pinned to the frame's top edge. */
+.quote-bubble {
+  position: absolute;
+  top: 18%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 80%;
+  padding: 6px 10px;
+  background: var(--bg-color-soft);
+  border: 1px solid var(--person-color);
+  border-radius: 4px;
+  color: var(--person-color);
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 0.8rem;
+  text-align: center;
+  z-index: 2;
+}
+.quote-tail {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--person-color);
+  font-family: "SF Mono", Menlo, monospace;
+  line-height: 0.5;
+}
+
+/* ──────────────────────────────────────────────
+   THE ASCII CONTAINER — ported from
+   HelloStranger.person.svelte lines 332-358.
+
+   In the original, font-size is 2.9em and line-height is 0.2rem.
+   We keep the *ratio* but express line-height in em (relative to
+   the pre's own font-size) so the sprite stays coherent at any
+   container size. If rows look too tight → bump line-height;
+   if too loose → reduce it.
+   ────────────────────────────────────────────── */
+.asciiContainer {
+  font-family: "Lucida Console", Monaco, "Courier New", monospace;
+  font-size: 22px;                /* baseline character size (v5: 18→22 for larger figure) */
+  font-weight: bold;
+  letter-spacing: -0.1em;
+  color: var(--person-color);
+  user-select: none;
+  transition: color 0.4s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* Nudge the visual mass upward: sprite top 2-3 rows are mostly whitespace,
+     so geometric centering pushes the figure too low. This padding-bottom
+     shifts content up (equivalent to a lower "center of mass"). */
+  padding-bottom: 8%;
+}
+
+/* Pixel-art squish: hello-stranger keeps line-height *much* smaller than
+   font-size so rows overlap, producing the dense mosaic look instead of
+   a loose grid. The aspect ratio of 18 rows should end up close to 18
+   cols of character width. Character-cell width ≈ 0.55em, so target
+   line-height ≈ 0.55em for square.  */
+.asciiContainer pre {
+  margin: 0;
+  padding: 0;
+  font-family: inherit;
+  font-size: 1em;
+  line-height: 0.55em;             /* KEY: rows overlap to match column width */
+  letter-spacing: -0.1em;
+  white-space: pre;
+}
+
+.sprite-meta {
+  margin-top: 16px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-family: "SF Mono", Menlo, monospace;
+}
+
+/* ──────────────────────────────────────────────
+   STATUS BAR (bottom)
+   ────────────────────────────────────────────── */
+.status-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 48px;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 0 20px;
+  font-size: 0.85rem;
+  z-index: 100;
+}
+
+#btn-connect {
+  padding: 6px 14px;
+  background: var(--accent);
+  color: #111;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+#btn-connect:hover { background: #9fd5e8; }
+#btn-connect[disabled] {
+  background: #444;
+  color: #999;
+  cursor: not-allowed;
+}
+
+.status-text {
+  color: var(--text-muted);
+}
+.status-text.ok { color: #80d080; }
+.status-text.err { color: #e08080; }

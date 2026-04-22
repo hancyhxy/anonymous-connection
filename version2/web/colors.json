@@ -1,0 +1,68 @@
+{
+  "_meta": {
+    "source": "v5: 2D palette (mood × energy). Base hex values informed by hello-stranger's original 1D energy scale (MIT, The Pudding, 2022), then re-curated per mood-row to shift hue/temperature while energy still controls brightness/saturation within each row.",
+    "reference": "hello-stranger upstream: https://pudding.cool/2025/06/hello-stranger/ (MIT, 2022)",
+    "v5_note": "mood is now a color axis, not an animation axis. Animation tempo is a hidden constant in app.js (ANIM_INTERVAL_MS). Smile is a direct user dimension (Q_SMILE). renderer.js reads colors.palette[state.mood][state.bg_level].hex and derives character / bg / border via the unchanged hello-stranger darken/lighten/darkest algorithm."
+  },
+
+  "mood": {
+    "0": { "key": "chill",    "note": "cool / pensive — teal → indigo. The 'blue-green' family the user associates with sadness/withdrawn." },
+    "1": { "key": "curious",  "note": "alert / open — cyan → sky blue." },
+    "2": { "key": "playful",  "note": "HAPPY — magenta → pink → hot pink. The user's 'purple-pink' family for joy." },
+    "3": { "key": "tired",    "note": "drained — grey → warm grey → taupe. The user's 'grey' family for exhaustion." },
+    "4": { "key": "glowing",  "note": "radiant — gold → warm orange → amber." }
+  },
+
+  "palette": {
+    "0": {
+      "0": { "key": "chill-empty",    "hex": "#2a4a52" },
+      "1": { "key": "chill-low",      "hex": "#3a6670" },
+      "2": { "key": "chill-medium",   "hex": "#4a8089" },
+      "3": { "key": "chill-steady",   "hex": "#3d7bb5" },
+      "4": { "key": "chill-high",     "hex": "#2c5db8" },
+      "5": { "key": "chill-electric", "hex": "#1e3fa8" }
+    },
+    "1": {
+      "0": { "key": "curious-empty",    "hex": "#2e6670" },
+      "1": { "key": "curious-low",      "hex": "#3e8a98" },
+      "2": { "key": "curious-medium",   "hex": "#4faec0" },
+      "3": { "key": "curious-steady",   "hex": "#42a8d8" },
+      "4": { "key": "curious-high",     "hex": "#2f95e5" },
+      "5": { "key": "curious-electric", "hex": "#1a7ff0" }
+    },
+    "2": {
+      "0": { "key": "playful-empty",    "hex": "#6e3b78" },
+      "1": { "key": "playful-low",      "hex": "#9b4aa5" },
+      "2": { "key": "playful-medium",   "hex": "#c865c8" },
+      "3": { "key": "playful-steady",   "hex": "#e870c0" },
+      "4": { "key": "playful-high",     "hex": "#f95ca8" },
+      "5": { "key": "playful-electric", "hex": "#ff3d8f" }
+    },
+    "3": {
+      "0": { "key": "tired-empty",    "hex": "#4a4a4a" },
+      "1": { "key": "tired-low",      "hex": "#666663" },
+      "2": { "key": "tired-medium",   "hex": "#85837e" },
+      "3": { "key": "tired-steady",   "hex": "#9a968d" },
+      "4": { "key": "tired-high",     "hex": "#a8a498" },
+      "5": { "key": "tired-electric", "hex": "#b5b0a0" }
+    },
+    "4": {
+      "0": { "key": "glowing-empty",    "hex": "#8e6420" },
+      "1": { "key": "glowing-low",      "hex": "#b48438" },
+      "2": { "key": "glowing-medium",   "hex": "#d8a04a" },
+      "3": { "key": "glowing-steady",   "hex": "#ecb548" },
+      "4": { "key": "glowing-high",     "hex": "#f8c93d" },
+      "5": { "key": "glowing-electric", "hex": "#ffd92a" }
+    }
+  },
+
+  "energy": {
+    "_note": "Legacy 1D energy scale — kept as fallback only. renderer.js uses palette[mood][bg_level] first, falls back to this if palette lookup fails.",
+    "0": { "key": "empty",    "hex": "#d62d87" },
+    "1": { "key": "low",      "hex": "#e06cd5" },
+    "2": { "key": "medium",   "hex": "#e9a5e2" },
+    "3": { "key": "steady",   "hex": "#b0877b" },
+    "4": { "key": "high",     "hex": "#d0caa4" },
+    "5": { "key": "electric", "hex": "#d6be76" }
+  }
+}

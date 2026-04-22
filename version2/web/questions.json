@@ -1,0 +1,74 @@
+{
+  "_meta": {
+    "source": "design/02-questions.md — our own question copy, replacing hello-stranger's race/age/politics/edu demographics.",
+    "principle": "All options are 'state right now', not 'fixed attribute'. Users should feel OK re-picking any time.",
+    "changelog": [
+      "v3: split 'color' into two independent dims — LOOK (sprite skeleton, 5 vars) + MOOD_COLOR (char tint, 5 vars). Plus POSE (3 vars) exposed as independent dim instead of internal animation frame.",
+      "v4: aligned to design/02-questions.md. Removed Q_SMILE (smile auto-triggered by mood.prefer_smile). Mood no longer drives color; it drives animation interval + smile toggle. Single color source: energy.hex → darken/lighten/darkest derives character/background/border colors.",
+      "v6: merged Q_LOOK + Q_POSE into a single Q_AVATAR visual gallery (15 thumbnails per sex). Rationale: in hello-stranger's original (HelloStranger.person.svelte:146-149 in github.com/the-pudding/hello-stranger) color was derived from race and num from personKey-hash — neither was ever user-facing. v5 mechanically exposed both underlying fields as two separate UI questions, which implied a composition semantics that doesn't exist (the 15 sprites per sex are independent hand-drawn illustrations, not a 5×3 composable matrix). v6 collapses them back into a single 'pick this one' gallery. No downstream change — renderer.js buildSpriteKey still reads sex_color_num[smile]."
+    ]
+  },
+  "Q_S": {
+    "prompt": "Pick a body — which one feels like you today?",
+    "field": "sex",
+    "options": [
+      { "value": "male",   "label": "male"   },
+      { "value": "female", "label": "female" }
+    ]
+  },
+  "Q_AVATAR": {
+    "prompt": "Which avatar feels like you today?",
+    "fields": ["color", "num"],
+    "note": "v6: replaces Q_LOOK + Q_POSE. Renders as a 15-tile visual gallery (5 × 3) per sex. Tiles are derived from sprites.json keys at runtime — no options array here. Click a tile to set state.color (0..4) and state.num (0..2) atomically. The 15 sprites are independent hand-drawn illustrations, NOT a composable look×pose matrix."
+  },
+  "Q_SMILE": {
+    "prompt": "Smile?",
+    "field": "smile",
+    "note": "v5: smile is now an independent user dimension (was mood-derived in v4). Completes the 2×5×3×2=60 sprite combination matrix from hello-stranger. Falls back to neutral sprite if no smile variant exists for the chosen sex/look/pose.",
+    "options": [
+      { "value": false, "label": "neutral" },
+      { "value": true,  "label": "smile"   }
+    ]
+  },
+  "Q_MOOD": {
+    "prompt": "How do you feel right now?",
+    "field": "mood",
+    "note": "v5: mood is kept as a soft vibe tag, but no longer affects animation interval (that is now a hidden constant — see app.js ANIM_INTERVAL_MS). prefer_smile is also no longer applied automatically; smile is a direct user choice.",
+    "options": [
+      { "value": 0, "label": "chill"    },
+      { "value": 1, "label": "curious"  },
+      { "value": 2, "label": "playful"  },
+      { "value": 3, "label": "tired"    },
+      { "value": 4, "label": "glowing"  }
+    ]
+  },
+  "Q_ENERGY": {
+    "prompt": "What's your energy level?",
+    "field": "bg_level",
+    "note": "Single color source. energy[bg_level].hex → darkenColor=character color, lightenColor=background, darkestColor=border. Same derivation algorithm as hello-stranger (MIT).",
+    "options": [
+      { "value": 0, "label": "empty"    },
+      { "value": 1, "label": "low"      },
+      { "value": 2, "label": "medium"   },
+      { "value": 3, "label": "steady"   },
+      { "value": 4, "label": "high"     },
+      { "value": 5, "label": "electric" }
+    ]
+  },
+  "Q_QUOTE": {
+    "prompt": "What are you thinking?",
+    "field": "quote",
+    "type": "text",
+    "maxLength": 28,
+    "suggestions": [
+      "need coffee",
+      "say hi",
+      "want quiet",
+      "open to chat",
+      "new here",
+      "tired",
+      "daydreaming",
+      "same vibe?"
+    ]
+  }
+}

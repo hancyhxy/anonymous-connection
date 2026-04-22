@@ -1,0 +1,96 @@
+<!-- Slide: Intro -->
+<!-- Completely different visual language from the journey map slide,
+     to demonstrate that each slide's <style> is fully self-contained. -->
+<section class="slide-intro">
+  <style>
+    .slide-intro {
+      width: 1920px; height: 1080px;
+      box-sizing: border-box;
+      padding: 120px 140px;
+      background: linear-gradient(135deg, #ffd9b5 0%, #f59159 55%, #b3492d 100%);
+      color: #fff;
+      font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 40px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .slide-intro::before {
+      content: "";
+      position: absolute;
+      top: -200px; right: -200px;
+      width: 700px; height: 700px;
+      background: rgba(255,255,255,0.08);
+      border-radius: 50%;
+    }
+
+    .slide-intro::after {
+      content: "";
+      position: absolute;
+      bottom: -150px; left: -150px;
+      width: 500px; height: 500px;
+      background: rgba(255,255,255,0.06);
+      border-radius: 50%;
+    }
+
+    .slide-intro .eyebrow {
+      font-size: 20px;
+      letter-spacing: 6px;
+      font-weight: 600;
+      opacity: 0.85;
+      text-transform: uppercase;
+      position: relative;
+      z-index: 1;
+    }
+
+    .slide-intro .title {
+      font-size: 140px;
+      font-weight: 800;
+      line-height: 1.05;
+      letter-spacing: -2px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .slide-intro .title .amp {
+      font-weight: 300;
+      font-style: italic;
+      opacity: 0.75;
+    }
+
+    .slide-intro .subtitle {
+      font-size: 32px;
+      line-height: 1.5;
+      max-width: 1200px;
+      font-weight: 300;
+      opacity: 0.92;
+      position: relative;
+      z-index: 1;
+    }
+
+    .slide-intro .meta {
+      position: absolute;
+      left: 140px;
+      bottom: 80px;
+      font-size: 16px;
+      letter-spacing: 2px;
+      opacity: 0.7;
+      z-index: 1;
+    }
+  </style>
+
+  <div class="eyebrow">UTS · Physical Interaction of Prototyping · v2</div>
+  <h1 class="title">
+    Hello Stranger
+  </h1>
+  <p class="subtitle">
+    An anonymous social prototype that turns the awkward step of approaching
+    a stranger into a mutual, confirmed moment — powered by a collective
+    screen, handheld devices, and a single tap.
+  </p>
+  <div class="meta">XINYI HAN · 2026</div>
+
+</section>

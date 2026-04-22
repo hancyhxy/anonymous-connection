@@ -1,0 +1,14 @@
+{
+	"politics": {
+		"0": "#c2b0b6",
+		"1": "#d94a64",
+		"2": "#fab1bf",
+		"3": "#e4caed",
+		"4": "#a3d0e3",
+		"6": "#48afdb"
+	},
+	"race": {"american_indian_or_alaska_native": "#ff997a","prefer_not_to_say":"#ff997a","other":"#ff997a","mixed":"#ff997a","native_hawaiian_or_pacific_islander":"#d173bb","asian":"#d173bb","black_or_african_american": "#95c6ed","hispanic_or_latino": "#9fe0cf","white": "#c9c1af"},
+	"edu": {"some_high_school":"#bf93cf","completed_high_school":"#bf93cf","some_college":"#e35db2","associate_degree":"#d1882e","bachelors_degree":"#e8d26f","masters_degree":"#6883a3","doctoral_degree":"#6883a3","professional_degree":"#6883a3"},
+	"raw": {"Negative": "#845aad", "Average": "#706267", "Positive": "#ede977"},
+	"age": {"0-19": "#d62d87", "20-29": "#e06cd5", "30-39": "#e9a5e2", "40-49": "#b0877b", "50-59": "#d0caa4", "60+": "#d6be76"}
+}

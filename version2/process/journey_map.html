@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>User Journey Map — Hello Stranger</title>
+  <style>
+    /* ============================================
+       User Journey Map — Hello Stranger (pip / v2)
+       ============================================ */
+
+    /* ---------- Base & Reset ---------- */
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+      background: #fff;
+      color: #333;
+      padding: 12px 4px;
+    }
+
+    /* ---------- Container ---------- */
+    .ujm-container {
+      max-width: 1400px;
+      margin: 0 auto;
+      background: #fff;
+      border-radius: 10px;
+      padding: 30px 24px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+    }
+
+    /* ---------- Title ---------- */
+    .ujm-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #1e3440;
+      margin-bottom: 18px;
+      letter-spacing: 0.4px;
+    }
+
+    /* ---------- Header Cards ---------- */
+    .ujm-header {
+      display: grid;
+      grid-template-columns: 1.2fr 1.4fr 1fr;
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .ujm-header-card {
+      border: 1px solid #d6dde3;
+      border-radius: 6px;
+      padding: 12px 15px;
+      background: #f5f7f9;
+    }
+
+    .ujm-header-card h3 {
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      margin-bottom: 7px;
+    }
+
+    .ujm-user-info {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+    }
+
+    .ujm-user-info h3    { color: #3f7382; }  /* deep blue */
+    .ujm-scenario h3     { color: #4a6b8f; }  /* mid blue */
+    .ujm-expectations h3 { color: #6e5e8f; }  /* blue-violet — a subtle end-note */
+
+    .ujm-avatar {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: #dce3e8;  /* cool neutral matching the overall blue-to-pink theme */
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+
+    .ujm-avatar-img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      /* Pull the framing up slightly so the character's face (not the "new here"
+         speech bubble or the bottom grid) sits roughly in the circle center. */
+      object-position: center 38%;
+    }
+
+    .ujm-quote {
+      font-style: italic;
+      color: #666;
+      font-size: 10px;
+      margin-bottom: 5px;
+    }
+
+    .ujm-user-text p,
+    .ujm-scenario p,
+    .ujm-expectations p {
+      font-size: 10px;
+      line-height: 1.55;
+      color: #555;
+    }
+
+    .ujm-expectations ul {
+      list-style: disc;
+      padding-left: 14px;
+      font-size: 10px;
+      line-height: 1.6;
+      color: #555;
+    }
+
+    /* ---------- Stage Header Colors ---------- */
+    /* Blue deepens through stages 1–3, then shifts gently into violet/pink-violet
+       by stages 4–5. A subtle warming cue, not a rainbow. */
+    .stage-1 { background: #c9d9e8; color: #1e3440; }  /* light mist blue */
+    .stage-2 { background: #a4b8d0; color: #1e3440; }  /* mid blue */
+    .stage-3 { background: #7d94b5; color: #fff; }     /* deep blue-grey */
+    .stage-4 { background: #8a82b0; color: #fff; }     /* blue-violet */
+    .stage-5 { background: #9c7cac; color: #fff; }     /* soft pink-violet, a hint of warmth */
+
+    /* STAGES label in thead: matches the Stage 1–5 cells' visual weight —
+       a light-grey "chip" on the far left, same rounded corners, same
+       padding. Now that the spine gutter column is gone, this cell really
+       is the leftmost thead chip, so the grey block no longer looks
+       "stray" — it reads as the row header for the Stage 1–5 strip. */
+    .ujm-label-col {
+      background: #e2e6ea;
+      color: #444;
+      text-align: center;
+    }
+
+    .ujm-table thead th {
+      padding: 9px 11px;
+      text-align: center;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.4px;
+      border-radius: 5px;
+    }
+
+    .arrow {
+      font-size: 8px;
+      margin-left: 5px;
+      opacity: 0.7;
+    }
+
+    /* ---------- Table Layout ---------- */
+    .ujm-table-wrapper {
+      overflow-x: auto;
+    }
+
+    .ujm-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      font-size: 10px;
+      line-height: 1.55;
+      table-layout: fixed;
+    }
+
+    .ujm-label-col,
+    .ujm-label {
+      width: 90px;
+      min-width: 90px;
+    }
+
+    /* ---------- Body Cells ---------- */
+    /* 1px light grey row separators live on every body cell by default —
+       these are the WITHIN-GROUP dividers (e.g. GOALS ↔ EMOTIONAL FRICTION).
+       The .ujm-group vertical-label column is excluded so the line doesn't
+       chop through the SETUP/PROCESS/RESPONSE spine. */
+    .ujm-table tbody td {
+      padding: 10px 12px;
+      vertical-align: top;
+      border-bottom: 1px solid #e5e9ed;
+    }
+
+    .ujm-label {
+      font-weight: 700;
+      font-size: 9px;
+      letter-spacing: 0.6px;
+      color: #555;
+      text-align: left;
+      vertical-align: middle;
+      background: #eef1f4;
+    }
+
+    .ujm-table ol {
+      padding-left: 14px;
+      margin: 0;
+    }
+
+    .ujm-table ol li { margin-bottom: 3px; }
+
+    .ujm-table p {
+      margin-bottom: 4px;
+      font-size: 10px;
+    }
+
+    .ujm-table p strong {
+      color: #1e3440;
+      font-size: 9px;
+    }
+
+    /* ---------- Row-based group colors (alternating grey / white zebra) ----------
+       Two-tone alternation keeps SETUP vs PROCESS vs RESPONSE visually
+       distinct without a third color:
+         SETUP    → grey   (#f7f8fa)
+         PROCESS  → white  (#fff)
+         RESPONSE → grey   (#f7f8fa, same as SETUP)
+       Applies to every cell now that the spine gutter column is gone. */
+
+    /* Each group is a single flat color block — spine cell, row-label
+       column, and data cells all share the same background. The group
+       boundary is communicated purely by the grey→white→grey color
+       switch between groups, not by internal layering. */
+    .group-setup    td { background: #f7f8fa; color: #3a4a5a; }
+    .group-process  td { background: #fff;    color: #3a4a5a; }
+    .group-response td { background: #f7f8fa; color: #3a4a5a; }
+
+    /* ---------- Group spine column (SETUP / PROCESS / RESPONSE) ----------
+       A narrow-ish leftmost column holds the group label as horizontal
+       text, vertically centered across the group's rows via rowspan.
+       No border, no special background — the cell inherits the group's
+       flat zebra color just like its neighboring data cells, so the
+       group reads as one unbroken color block from left to right. */
+    .ujm-group {
+      width: 90px;
+      min-width: 90px;
+      text-align: center;
+      vertical-align: middle;
+      padding: 10px 8px;
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 1.5px;
+      color: #2a3a4a;
+    }
+
+    /* Thead corner cell above the spine column: empty, transparent — it's
+       just a spacer so the Stage 1–5 chips align with the data columns. */
+    .ujm-group-head {
+      width: 90px;
+      min-width: 90px;
+      background: transparent;
+    }
+
+    /* Row-specific LAYOUT only — no colors here */
+    .row-touchpoints td   { text-align: left; vertical-align: top; }
+
+    /* Merged FEELING + THOUGHTS row: each data cell stacks a centered
+       emoji block on top and a left-aligned italic thoughts list below.
+       The cell (and the row label) are top-aligned so the row label sits
+       level with the emoji's top edge, matching how the other row labels
+       (ACTIONS, GOALS, etc.) relate to their data content. */
+    .row-feeling-thoughts td              { vertical-align: top; }
+    .row-feeling-thoughts td.ujm-label    { text-align: left; }
+    .row-feeling-thoughts .thoughts-list  { font-style: italic; color: #555; }
+
+    /* ---------- Emotion Cells ---------- */
+    /* emotion-block: the centered emoji + caption pair that sits at the
+       top of each merged FEELING+THOUGHTS data cell. Centering here is
+       local to the block — it does not leak to the sibling thoughts list
+       below, which stays left-aligned. */
+    .emotion-block {
+      text-align: center;
+      margin-bottom: 12px;  /* breathing room before the thoughts list */
+    }
+
+    .emotion-emoji {
+      font-size: 28px;
+      margin-bottom: 5px;
+    }
+
+    /* Caption under each emoji — styled to match .tp-feature so the two
+       feature-name labels (e.g. "Curious / Lightly invested" here, and
+       "Editable Avatar" in the TOUCHPOINTS row) read as the same kind of
+       label across the table. */
+    .emotion-text {
+      font-size: 10px;
+      font-weight: 700;
+      font-style: normal;
+      color: #1e3440;
+      letter-spacing: 0.3px;
+    }
+
+    /* ---------- Touchpoint Cells ---------- */
+    .touchpoint-icons { margin-bottom: 5px; }
+
+    .tp-icon {
+      font-size: 22px;
+      margin: 0 3px;
+      display: inline-block;
+    }
+
+    .tp-icon.tp-mobile  { color: #3a7abf; }  /* blue */
+    .tp-icon.tp-screen  { color: #4a6b8f; }  /* mid blue */
+    .tp-icon.tp-device  { color: #7d94b5; }  /* deep blue-grey */
+    .tp-icon.tp-person  { color: #8a82b0; }  /* blue-violet */
+
+    .touchpoint-detail {
+      font-size: 9px;
+      color: #666;
+      line-height: 1.4;
+      text-align: center;
+    }
+
+    /* ---------- Semantic bullet lists (Thoughts / Actions / Friction / Touchpoints / Opportunities) ---------- */
+    .ujm-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .ujm-list li {
+      margin-bottom: 2px;
+      padding-left: 10px;
+      position: relative;
+    }
+
+    .ujm-list li::before {
+      content: "–";
+      position: absolute;
+      left: 0;
+      color: #888;
+    }
+
+    /* ---------- Tight padding for bullet-heavy rows ---------- */
+    .row-goals td,
+    .row-actions td,
+    .row-feeling-thoughts td,
+    .row-friction td,
+    .row-opportunities td {
+      padding: 7px 10px;
+    }
+
+    .ujm-table { line-height: 1.45; }
+
+    /* ---------- Touchpoints feature-block styling ---------- */
+    .tp-feature {
+      font-weight: 700;
+      font-size: 10px;
+      color: #1e3440;
+      margin-bottom: 4px;
+      letter-spacing: 0.3px;
+    }
+
+    .tp-feature + .tp-feature {
+      margin-top: 8px;
+    }
+
+    /* ---------- Responsive ---------- */
+    @media (max-width: 900px) {
+      .ujm-header { grid-template-columns: 1fr; }
+      .ujm-table  { font-size: 12px; }
+      .ujm-container { padding: 20px 12px; }
+    }
+
+    /* ---------- Print ---------- */
+    @media print {
+      body { background: #fff; padding: 0; }
+      .ujm-container { box-shadow: none; padding: 20px; }
+      .ujm-table { font-size: 11px; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="ujm-container">
+
+    <!-- Title -->
+    <h1 class="ujm-title">USER JOURNEY MAP / Anonymous Social Connection</h1>
+
+    <!-- Header: User Info / Scenario / Expectations -->
+    <div class="ujm-header">
+      <div class="ujm-header-card ujm-user-info">
+        <div class="ujm-avatar">
+          <img src="hello-stranger-avatar.png" alt="Hello Stranger avatar" class="ujm-avatar-img">
+        </div>
+        <div class="ujm-user-text">
+          <h3>USER INFO</h3>
+          <p class="ujm-quote">"I want to meet people — I just don't want to be the one who starts the conversation."</p>
+          <p>Mia, 23, UTS master's student, 6 months in Sydney. Loves meetups but usually stands by the drinks table scrolling her phone. Mild approach anxiety around strangers.</p>
+        </div>
+      </div>
+      <div class="ujm-header-card ujm-scenario">
+        <h3>SCENARIO</h3>
+        <p>Mia enters a social event where Hello Stranger is deployed. A collective screen sits in the room, and each attendee holds a small display device. She scans the QR code, sets up her anonymous avatar, picks interest topics, and then uses the screen + device to find someone worth approaching.</p>
+      </div>
+      <div class="ujm-header-card ujm-expectations">
+        <h3>EXPECTATIONS</h3>
+        <p>- Find someone with shared interests without cold-approaching<br>- Stay anonymous — no full name, no social handle<br>- Get a clear "confirmed" moment before speaking<br>- Receive a conversation starter, not just raw data</p>
+      </div>
+    </div>
+
+    <!-- Main Journey Table -->
+    <div class="ujm-table-wrapper">
+      <table class="ujm-table">
+
+        <!-- Stage Headers -->
+        <thead>
+          <tr>
+            <th class="ujm-group-head"></th>
+            <th class="ujm-label-col">STAGES</th>
+            <th class="ujm-stage stage-1">Stage 1: Entry &amp; Setup <span class="arrow">&#9654;</span></th>
+            <th class="ujm-stage stage-2">Stage 2: Observation <span class="arrow">&#9654;</span></th>
+            <th class="ujm-stage stage-3">Stage 3: Seeking <span class="arrow">&#9654;</span></th>
+            <th class="ujm-stage stage-4">Stage 4: Tap to Confirm <span class="arrow">&#9654;</span></th>
+            <th class="ujm-stage stage-5">Stage 5: Shared Topics Unlocked</th>
+          </tr>
+        </thead>
+
+        <tbody>
+
+          <!-- ========== SETUP: user's intent + internal barriers ========== -->
+
+          <!-- Goals -->
+          <tr class="row-goals group-setup">
+            <td class="ujm-group" rowspan="2">SETUP</td>
+            <td class="ujm-label">GOALS</td>
+            <td>Initialize an anonymous identity that still feels personal</td>
+            <td>Read the collective view and understand how group relations are shifting</td>
+            <td>Translate on-screen hints into a real person in physical space</td>
+            <td>Trigger a clear, mutually visible confirmation with the target person</td>
+            <td>Turn shared interests into a short, real conversation</td>
+          </tr>
+
+          <!-- Emotional Friction: moved up from its old position, sits alongside Goals -->
+          <tr class="row-friction group-setup">
+            <td class="ujm-label">EMOTIONAL<br>FRICTION</td>
+            <td>Shy to expose even a minimal identity to strangers</td>
+            <td>Doesn't know how she's being perceived by others in the room</td>
+            <td>Doesn't know the other person's interests, or whether they want to be approached</td>
+            <td>The fear of public rejection if the tap is refused or ignored</td>
+            <td>Unsure how to carry the conversation once the shared topic runs out</td>
+          </tr>
+
+          <!-- ========== PROCESS: what Mia actually experiences ========== -->
+
+          <!-- Actions -->
+          <tr class="row-actions group-process">
+            <td class="ujm-group" rowspan="2">PROCESS</td>
+            <td class="ujm-label">ACTIONS</td>
+            <td>
+              <ul class="ujm-list">
+                <li>Scans QR code and opens the web page</li>
+                <li>Customizes avatar (shape / color / accessory)</li>
+                <li>Picks several interest topics</li>
+                <li>Submits; handheld device syncs personal content</li>
+              </ul>
+            </td>
+            <td>
+              <ul class="ujm-list">
+                <li>Looks up at the collective screen</li>
+                <li>Watches avatars reorder, shift, and form relational lines</li>
+                <li>Guesses the logic behind the arrangement</li>
+                <li>Locates her own avatar within the group</li>
+              </ul>
+            </td>
+            <td>
+              <ul class="ujm-list">
+                <li>Cross-references on-screen cues with her handheld display</li>
+                <li>Moves around the space</li>
+                <li>Observes avatars shown on others' devices</li>
+                <li>Narrows down to a single candidate</li>
+              </ul>
+            </td>
+            <td>
+              <ul class="ujm-list">
+                <li>Approaches the target person</li>
+                <li>Initiates a tap (device proximity / touch)</li>
+                <li>Waits for synchronized feedback on both devices</li>
+                <li>Registers the confirmation</li>
+              </ul>
+            </td>
+            <td>
+              <ul class="ujm-list">
+                <li>Reads the shared topics surfaced on her device</li>
+                <li>Picks one as an opener</li>
+                <li>Has a 3–5 minute face-to-face conversation</li>
+                <li>Exits naturally, ready for the next round</li>
+              </ul>
+            </td>
+          </tr>
+
+          <!-- Feeling + Thoughts merged: emoji + caption on top (visual
+               anchor), internal-monologue quotes below (reading content).
+               Formerly two separate rows with a divider between them. -->
+          <tr class="row-feeling-thoughts group-process">
+            <td class="ujm-label">FEELING<br>&amp;<br>THOUGHTS</td>
+            <td>
+              <div class="emotion-block">
+                <div class="emotion-emoji">&#128522;</div>
+                <div class="emotion-text">Curious / Lightly invested</div>
+              </div>
+              <ul class="ujm-list thoughts-list">
+                <li>"Good, it's anonymous — no real name required."</li>
+                <li>"My avatar is actually kind of cute."</li>
+              </ul>
+            </td>
+            <td>
+              <div class="emotion-block">
+                <div class="emotion-emoji">&#129300;</div>
+                <div class="emotion-text">Curious / Trying to decode</div>
+              </div>
+              <ul class="ujm-list thoughts-list">
+                <li>"Those avatars keep drifting together — shared interests?"</li>
+                <li>"I'm not just an isolated dot."</li>
+              </ul>
+            </td>
+            <td>
+              <div class="emotion-block">
+                <div class="emotion-emoji">&#128064;</div>
+                <div class="emotion-text">Excited / Slightly uneasy</div>
+              </div>
+              <ul class="ujm-list thoughts-list">
+                <li>"That avatar moving toward me — is it the person in the yellow jacket?"</li>
+                <li>"What if I misidentify the person? That'd be awkward."</li>
+              </ul>
+            </td>
+            <td>
+              <div class="emotion-block">
+                <div class="emotion-emoji">&#128524;</div>
+                <div class="emotion-text">Tense then Confirmed</div>
+              </div>
+              <ul class="ujm-list thoughts-list">
+                <li>"What if I tap and nothing happens?"</li>
+                <li>"Both devices lit up — we matched."</li>
+              </ul>
+            </td>
+            <td>
+              <div class="emotion-block">
+                <div class="emotion-emoji">&#128516;</div>
+                <div class="emotion-text">Relaxed / Acknowledged</div>
+              </div>
+              <ul class="ujm-list thoughts-list">
+                <li>"We both listed film photography — that's easy to talk about."</li>
+                <li>"Way less painful than cold-approaching."</li>
+              </ul>
+            </td>
+          </tr>
+
+          <!-- ========== RESPONSE: what the system/design offers ========== -->
+
+          <!-- Touchpoints (now: design feature entities + supporting bullets) -->
+          <tr class="row-touchpoints group-response">
+            <td class="ujm-group" rowspan="2">RESPONSE</td>
+            <td class="ujm-label">TOUCHPOINTS</td>
+            <td>
+              <div class="tp-feature">Editable Avatar</div>
+              <ul class="ujm-list">
+                <li>Customize shape, color, accessory</li>
+                <li>Anonymous, yet personal</li>
+              </ul>
+              <div class="tp-feature">Interest Tags</div>
+              <ul class="ujm-list">
+                <li>Short-tag taxonomy across ~8 categories</li>
+                <li>Picks 3–5 that feel like her</li>
+              </ul>
+            </td>
+            <td>
+              <div class="tp-feature">Collective View</div>
+              <ul class="ujm-list">
+                <li>Avatars cluster by shared interests in real time</li>
+                <li>Gentle motion, not hard jumps</li>
+              </ul>
+            </td>
+            <td>
+              <div class="tp-feature">Handheld Display</div>
+              <ul class="ujm-list">
+                <li>Shows her own avatar + proximity cues to candidates</li>
+                <li>Translates collective coordinates into bodily direction</li>
+              </ul>
+            </td>
+            <td>
+              <div class="tp-feature">Tap Gesture + Dual Feedback</div>
+              <ul class="ujm-list">
+                <li>Two devices light up simultaneously</li>
+                <li>Haptic + color confirmation on both ends</li>
+              </ul>
+            </td>
+            <td>
+              <div class="tp-feature">Shared Topic Reveal</div>
+              <ul class="ujm-list">
+                <li>Surfaces 1–2 most specific overlapping interests</li>
+                <li>Each topic comes with a ready starter question</li>
+              </ul>
+            </td>
+          </tr>
+
+          <!-- Opportunities (now: meaningful experiences / benefits for the user) -->
+          <tr class="row-opportunities group-response">
+            <td class="ujm-label">OPPORTUNITIES</td>
+            <td>
+              <ul class="ujm-list">
+                <li>Enters the room with a self she <em>chose</em> to show</li>
+                <li>Low-stakes setup — no form, no real name, no bio</li>
+                <li>Already feels like a participant before saying a word</li>
+              </ul>
+            </td>
+            <td>
+              <ul class="ujm-list">
+                <li>Sees herself as part of a living group, not a wallflower</li>
+                <li>A sense of "the room is reading me too" — she's not alone in noticing</li>
+                <li>Curiosity replaces the urge to scroll her phone</li>
+              </ul>
+            </td>
+            <td>
+              <ul class="ujm-list">
+                <li>Approaching feels legitimate, not a cold approach</li>
+                <li>The system quietly gives her permission to move</li>
+                <li>She picks a person <em>because</em> of something, not at random</li>
+              </ul>
+            </td>
+            <td>
+              <ul class="ujm-list">
+                <li>A mutual, witnessed moment of "yes, this is us"</li>
+                <li>Connection feels earned, not scripted</li>
+                <li>The awkward first-contact is already done by the device</li>
+              </ul>
+            </td>
+            <td>
+              <ul class="ujm-list">
+                <li>Walks away with a real shared thread, not just small talk</li>
+                <li>The opener is handed to her — no scrambling for something to say</li>
+                <li>Leaves feeling she <em>met someone</em>, not just spoke to someone</li>
+              </ul>
+            </td>
+          </tr>
+
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+
+</body>
+</html>
