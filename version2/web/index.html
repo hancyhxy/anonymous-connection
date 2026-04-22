@@ -67,6 +67,15 @@
         </div>
       </fieldset>
 
+      <!-- Q_INTERESTS: multi-select tag picker, max 3 -->
+      <fieldset class="qblock" data-q="Q_INTERESTS">
+        <legend>pick up to 3 interests</legend>
+        <div class="interests-grid" id="opts-interests">
+          <!-- populated by app.js: 12 .interest-tag buttons -->
+        </div>
+        <div class="interest-hint" id="interests-hint" aria-live="polite"></div>
+      </fieldset>
+
       <!-- Q_QUOTE: free text -->
       <fieldset class="qblock" data-q="Q_QUOTE">
         <legend>what are you thinking?</legend>
@@ -103,6 +112,10 @@
         <div class="asciiContainer" id="avatar-container">
           <pre id="avatar-pre">loading sprites…</pre>
         </div>
+
+        <!-- interest badges — populated by app.js, pinned to the bottom
+             of the preview frame (inside the tinted background). -->
+        <div class="preview-interests" id="preview-interests" aria-hidden="true"></div>
       </div>
 
       <div class="sprite-meta">

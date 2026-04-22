@@ -49,7 +49,10 @@ const state = {
   mood: 0,          // vibe tag; no longer drives anything in v5+
   bg_level: 2,
   quote: "",
+  interests: [],    // v7: Q_INTERESTS — up to 3 tag values. Web-only for now,
+                    // not included in the device sync payload.
 };
+const MAX_INTERESTS = 3;
 
 // Internal animation pointer — NOT part of user state. Ticks on setInterval.
 // Used by renderer.js to pick frames[animFrame % frames.length].
@@ -141,6 +144,21 @@ function populateQuoteSuggestions() {
   container.innerHTML = questions.Q_QUOTE.suggestions.map(s => `
     <button type="button" class="suggestion-chip" data-suggest="${s}">${s}</button>
   `).join("");
+}
+
+// Q_INTERESTS (v7): multi-select tag picker, max 3.
+// Each tag is a toggle button; we track selection in state.interests.
+function populateInterests() {
+  const container = document.getElementById("opts-interests");
+  const opts = questions.Q_INTERESTS.options;
+  container.innerHTML = opts.map(opt => {
+    const isSelected = state.interests.includes(opt.value);
+    return `<button type="button" class="interest-tag${isSelected ? " selected" : ""}"
+              role="checkbox" aria-checked="${isSelected}"
+              data-value="${opt.value}">
+              <span class="interest-icon">${opt.icon}</span><span class="interest-label">${opt.label}</span>
+            </button>`;
+  }).join("");
 }
 
 
@@ -259,6 +277,73 @@ function wireEnergy() {
   handler();
 }
 
+// Rebuild the preview's interest row from state.interests.
+// Called after any selection change in wireInterests, and once on boot.
+// Format: "♪ music · ▶ film · ☕ food" — hidden when empty.
+function renderPreviewInterests() {
+  const row = document.getElementById("preview-interests");
+  if (!row) return;
+  if (!state.interests.length || !questions) {
+    row.innerHTML = "";
+    row.classList.remove("visible");
+    return;
+  }
+  const byValue = new Map(questions.Q_INTERESTS.options.map(o => [o.value, o]));
+  const parts = state.interests
+    .map(v => byValue.get(v))
+    .filter(Boolean)
+    .map(o => `<span class="preview-interest"><span class="preview-interest-icon">${o.icon}</span>${o.label}</span>`);
+  row.innerHTML = parts.join('<span class="preview-interest-sep">·</span>');
+  row.classList.add("visible");
+}
+
+// Q_INTERESTS: click a tag to toggle; enforce MAX_INTERESTS.
+// When selection is full, a 4th click doesn't add — it shows a hint
+// asking the user to deselect one first.
+function wireInterests() {
+  const container = document.getElementById("opts-interests");
+  const hint = document.getElementById("interests-hint");
+  let hintTimer = null;
+
+  const showHint = (msg) => {
+    hint.textContent = msg;
+    hint.classList.add("visible");
+    clearTimeout(hintTimer);
+    hintTimer = setTimeout(() => {
+      hint.classList.remove("visible");
+      hint.textContent = "";
+    }, 2400);
+  };
+
+  container.addEventListener("click", (e) => {
+    const tag = e.target.closest(".interest-tag");
+    if (!tag) return;
+    const value = tag.dataset.value;
+    const idx = state.interests.indexOf(value);
+
+    if (idx !== -1) {
+      // Already selected → deselect.
+      state.interests.splice(idx, 1);
+      tag.classList.remove("selected");
+      tag.setAttribute("aria-checked", "false");
+      hint.classList.remove("visible");
+      hint.textContent = "";
+    } else {
+      // Not yet selected.
+      if (state.interests.length >= MAX_INTERESTS) {
+        // Already at max — block and prompt.
+        showHint(`max ${MAX_INTERESTS} — tap one to free a slot`);
+        return;
+      }
+      state.interests.push(value);
+      tag.classList.add("selected");
+      tag.setAttribute("aria-checked", "true");
+    }
+    renderPreviewInterests();
+    // No syncDevice — interests are web-only; device sync payload unchanged.
+  });
+}
+
 function wireQuote() {
   const input = document.getElementById("input-quote");
   input.addEventListener("input", () => {
@@ -289,6 +374,7 @@ async function main() {
     populateAvatarGallery();
     populateSmile();
     populateMood();
+    populateInterests();
     populateQuoteSuggestions();
 
     wireSex();
@@ -296,6 +382,7 @@ async function main() {
     wireDelegated("opts-smile", "smile", "smile", toBool);
     wireDelegated("opts-mood",  "mood",  "mood");
     wireEnergy();
+    wireInterests();
     wireQuote();
 
     // USB Serial connect button. Once connected, the device:connected

@@ -164,6 +164,112 @@ html, body {
 }
 
 /* ──────────────────────────────────────────────
+   Q_INTERESTS (v7) — multi-select tag picker, max 3.
+   Visually inherits .choice (pill + accent-on-selected) with an
+   added icon prefix and explicit .selected class (toggled by JS,
+   not by a :has(input:checked) since these are buttons, not radios).
+   ────────────────────────────────────────────── */
+.interests-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.interest-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  color: inherit;
+  font-family: inherit;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.interest-tag:hover {
+  border-color: #555;
+}
+
+.interest-tag.selected {
+  border-color: var(--accent);
+  background: rgba(126, 200, 227, 0.15);
+  color: var(--text-primary);
+}
+
+.interest-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+  opacity: 0.9;
+  /* Force text-style rendering — some single-color Unicode symbols
+     (e.g. ⚽ ☕ ✈ ❤ ✏) get auto-upgraded to color emoji on macOS/iOS.
+     We want a consistent single-color look matching the ASCII sprite. */
+  font-variant-emoji: text;
+}
+
+.interest-tag.selected .interest-icon {
+  opacity: 1;
+}
+
+.interest-hint {
+  margin-top: 10px;
+  font-size: 0.8rem;
+  color: var(--accent);
+  opacity: 0;
+  transition: opacity 0.2s;
+  min-height: 1.2em;
+}
+
+.interest-hint.visible {
+  opacity: 1;
+}
+
+/* Preview-side inline badges — a single line of selected interests
+   pinned to the bottom of #preview-frame (inside the tinted background),
+   so it reads as "avatar + tags" on one card. */
+.preview-interests {
+  position: absolute;
+  bottom: 40px;
+  left: 16px;
+  right: 16px;
+  display: none;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 12px;
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: var(--darker-color, var(--text-primary));
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.preview-interests.visible {
+  display: flex;
+}
+
+.preview-interest {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.preview-interest-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+  opacity: 0.9;
+  font-variant-emoji: text;
+}
+
+.preview-interest-sep {
+  opacity: 0.4;
+  user-select: none;
+}
+
+/* ──────────────────────────────────────────────
    Q_AVATAR gallery (v6) — 15 sprite thumbnails (5 × 3).
    Decoupled from --person-color: tiles stay a fixed grey
    so changing energy doesn't repaint the picker while the
@@ -326,17 +432,18 @@ html, body {
    not pinned to the frame's top edge. */
 .quote-bubble {
   position: absolute;
-  top: 18%;
+  top: 12%;
   left: 50%;
   transform: translate(-50%, -50%);
   max-width: 80%;
-  padding: 6px 10px;
+  padding: 9px 14px;
   background: var(--bg-color-soft);
   border: 1px solid var(--person-color);
-  border-radius: 4px;
+  border-radius: 6px;
   color: var(--person-color);
   font-family: "SF Mono", Menlo, monospace;
-  font-size: 0.8rem;
+  font-size: 1rem;
+  font-weight: 500;
   text-align: center;
   z-index: 2;
 }
@@ -347,6 +454,7 @@ html, body {
   transform: translateX(-50%);
   color: var(--person-color);
   font-family: "SF Mono", Menlo, monospace;
+  font-size: 1.1rem;
   line-height: 0.5;
 }
 
@@ -371,10 +479,12 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Nudge the visual mass upward: sprite top 2-3 rows are mostly whitespace,
-     so geometric centering pushes the figure too low. This padding-bottom
-     shifts content up (equivalent to a lower "center of mass"). */
-  padding-bottom: 8%;
+  /* Nudge vertical position. The whole avatar+bubble+tags stack should
+     feel centered-slightly-high — tweak these two to shift the avatar
+     itself. Positive padding-bottom lifts the avatar up; padding-top
+     pushes it down. */
+  padding-top: 0;
+  padding-bottom: 6%;
 }
 
 /* Pixel-art squish: hello-stranger keeps line-height *much* smaller than

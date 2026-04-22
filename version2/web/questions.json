@@ -55,6 +55,26 @@
       { "value": 5, "label": "electric" }
     ]
   },
+  "Q_INTERESTS": {
+    "prompt": "Pick up to 3 interests",
+    "field": "interests",
+    "maxSelect": 3,
+    "note": "Multi-select tag picker. state.interests is an array of tag values. Icons are Unicode symbols chosen to work in both the browser font and Unifont on the device side (when firmware eventually renders them). Web-only for now — not in the device sync payload.",
+    "options": [
+      { "value": "music",  "label": "music",  "icon": "♪" },
+      { "value": "film",   "label": "film",   "icon": "▶" },
+      { "value": "sport",  "label": "sport",  "icon": "◎" },
+      { "value": "art",    "label": "art",    "icon": "◈" },
+      { "value": "tech",   "label": "tech",   "icon": "※" },
+      { "value": "food",   "label": "food",   "icon": "◆" },
+      { "value": "gaming", "label": "gaming", "icon": "♠" },
+      { "value": "travel", "label": "travel", "icon": "✈︎" },
+      { "value": "books",  "label": "books",  "icon": "❏" },
+      { "value": "photo",  "label": "photo",  "icon": "◉" },
+      { "value": "dance",  "label": "dance",  "icon": "♬" },
+      { "value": "pets",   "label": "pets",   "icon": "♥" }
+    ]
+  },
   "Q_QUOTE": {
     "prompt": "What are you thinking?",
     "field": "quote",
