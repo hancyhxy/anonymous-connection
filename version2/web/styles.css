@@ -69,21 +69,32 @@ html, body {
 @media (max-width: 640px) {
   .layout {
     flex-direction: column;
+    min-height: auto;
   }
+  /* Preview is pinned to the top of the viewport on mobile.
+     position: fixed (not sticky) — sticky inside a flex column gets
+     flaky on iOS Safari, and we want a rock-solid opaque header that
+     scrolled content slides UNDER, not through. */
   #preview {
-    order: -1;
-    flex: 0 0 auto;
-    height: 50vh;
-    min-height: 360px;
-    border-bottom: 1px solid var(--border);
-    position: sticky;
+    position: fixed;
     top: 0;
-    z-index: 10;
+    left: 0;
+    right: 0;
+    height: 44vh;
+    padding: 20px 16px;
+    /* Opaque background so the options scrolling past don't show through.
+       --background-color is the current energy-derived hex — matches
+       preview's visual intent. Falls back to panel grey if not yet set. */
+    background: var(--background-color, var(--bg-panel));
+    border-bottom: 1px solid var(--border);
+    z-index: 50;
   }
+  /* Options panel starts below the fixed preview and leaves room for
+     the fixed status bar at the bottom (48px + breathing space). */
   #options {
     flex: 1 1 auto;
     border-right: none;
-    padding: 20px 16px 64px;
+    padding: calc(44vh + 20px) 16px calc(48px + 32px) 16px;
   }
 }
 
@@ -381,11 +392,11 @@ html, body {
   white-space: pre;
 }
 
+/* sprite-meta: debug-only label (e.g. "male_0_0").
+   Hidden visually but kept in the DOM so applyToDOM's
+   #sprite-key writes still succeed — inspect via devtools if needed. */
 .sprite-meta {
-  margin-top: 16px;
-  color: var(--text-muted);
-  font-size: 0.75rem;
-  font-family: "SF Mono", Menlo, monospace;
+  display: none;
 }
 
 /* ──────────────────────────────────────────────
