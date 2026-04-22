@@ -1,0 +1,79 @@
+MIT License
+
+Copyright (c) 2026 Xinyi Han
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+--------------------------------------------------------------------------------
+
+THIRD-PARTY NOTICES
+
+This project incorporates material from the following third-party source,
+which retains its own copyright notice as required by its license.
+
+
+## Hello, Stranger — The Pudding (Alvin Chang)
+
+Source: https://github.com/the-pudding/hello-stranger
+Project: https://pudding.cool/2025/06/hello-stranger/
+
+Specific assets adapted from this project:
+  - Sprite art (the 36 hand-drawn ASCII character sprites in
+    version2/web/sprites.json, used unchanged).
+  - Three-tone color-derivation algorithm — the darkenColor,
+    lightenColor, and darkestColor functions ported line-for-line
+    into version2/web/renderer.js.
+  - The color palette hex values inherited into version2/web/colors.json
+    (re-organized into a 2D mood × energy grid for our semantics).
+  - The CSS <pre> + negative letter-spacing rendering approach used in
+    version2/web/styles.css (.asciiContainer block).
+
+Original copyright notice, included verbatim per MIT License terms:
+
+    MIT License
+
+    Copyright (c) 2022 The Pudding
+
+    Permission is hereby granted, free of charge, to any person obtaining a copy
+    of this software and associated documentation files (the "Software"), to deal
+    in the Software without restriction, including without limitation the rights
+    to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+    copies of the Software, and to permit persons to whom the Software is
+    furnished to do so, subject to the following conditions:
+
+    The above copyright notice and this permission notice shall be included in all
+    copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+    IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+    FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+    AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+    LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+    OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+    SOFTWARE.
+
+
+## Adafruit GFX Library
+
+Source: https://github.com/adafruit/Adafruit-GFX-Library
+
+A snapshot of this library is checked into version1/Adafruit-GFX-Library-master/
+for legacy firmware builds. It is distributed under the BSD license; see that
+directory's own license file for the full terms.

@@ -100,3 +100,9 @@ Sprite art and the three-tone color-derivation algorithm are adapted
 from [The Pudding — *Hello, Stranger*](https://pudding.cool/2025/06/hello-stranger/)
 by Alvin Chang (MIT License, Copyright (c) 2022 The Pudding).
 Everything else is original coursework.
+
+## License
+
+This project is licensed under the MIT License (see [LICENSE](./LICENSE)).
+Third-party notices for assets borrowed from *Hello, Stranger* and the
+Adafruit GFX library are included in the same file.
