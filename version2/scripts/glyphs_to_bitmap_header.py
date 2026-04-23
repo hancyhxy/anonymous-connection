@@ -44,6 +44,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 SPRITES_JSON = ROOT / "web" / "sprites.json"
+QUESTIONS_JSON = ROOT / "web" / "questions.json"
 HEADER_OUT = ROOT / "firmware" / "serial_avatar" / "glyphs.h"
 CACHE_DIR = ROOT / "scripts" / ".cache"
 UNIFONT_URL = "https://unifoundry.com/pub/unifont/unifont-16.0.02/font-builds/unifont-16.0.02.hex.gz"
@@ -121,6 +122,15 @@ def discover_codepoints() -> list[int]:
             for x in v.values():
                 walk(x)
     walk(data)
+
+    # (3) Every interest icon (Q_INTERESTS) — firmware renders these in the
+    # tag row below the sprite. Pulled from questions.json so adding a new
+    # interest in the web UI auto-bakes its glyph on next regen.
+    with open(QUESTIONS_JSON, encoding="utf-8") as f:
+        qd = json.load(f)
+    for opt in qd.get("Q_INTERESTS", {}).get("options", []):
+        for ch in opt.get("icon", ""):
+            cps.add(ord(ch))
 
     return sorted(cps)
 

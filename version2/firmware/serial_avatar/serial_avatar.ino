@@ -33,15 +33,27 @@
 // IDE's auto-prototype generator. (The preprocessor inserts forward decls
 // for every top-level function before any user code, and those decls would
 // reference AvatarState before this struct is visible if we put it later.)
+// Interest tag — one row of "icon label" badges renders below the sprite.
+// Web caps Q_INTERESTS at 3 selections, so a fixed 3-slot array is enough
+// (no heap, no growth). Both fields are UTF-8: icon is a single Unicode
+// glyph (e.g. "♪"), label is a short ASCII word (e.g. "music").
+#define MAX_INTERESTS 3
+struct InterestTag {
+  String icon;
+  String label;
+};
+
 struct AvatarState {
-  int    mood;
-  int    energy;
-  String sex;
-  int    color;
-  int    num;
-  bool   smile;
-  String quote;
-  bool   valid;
+  int          mood;
+  int          energy;
+  String       sex;
+  int          color;
+  int          num;
+  bool         smile;
+  String       quote;
+  InterestTag  interests[MAX_INTERESTS];
+  int          interest_count;
+  bool         valid;
 };
 
 
@@ -56,6 +68,20 @@ struct AvatarState {
 #define LCD_W     240
 #define LCD_H     240
 #define ROTATION  0
+
+// ---- Heart rate sensor (3-wire analog pulse sensor) ------------------------
+// Wired:  VCC→3V3, GND→GND, S→GPIO3.
+// GPIO3 is ADC1_CH3 on ESP32-C6 — clean ADC pin (1/2 are strapping-adjacent).
+#define HR_PIN          3
+#define HR_SAMPLE_MS    20      // 50 Hz sampling
+#define HR_REPORT_MS    1000    // upstream report cadence
+#define HR_BASELINE_N   100     // ~2 s window for DC-offset estimate
+#define HR_RISE_THRESH  40      // ADC counts above baseline → peak candidate
+                                // (tuned down from 80 — 80 was too strict for
+                                // a finger pressed firmly, where pulse amplitude
+                                // can drop below 60 counts)
+#define HR_DEBUG        1       // 1 = also log raw ADC + baseline at 5 Hz so
+                                // the threshold can be tuned by eyeball
 #define IPS_MODE  true
 
 Arduino_DataBus *bus = new Arduino_ESP32SPI(TFT_DC, TFT_CS, TFT_SCK, TFT_MOSI, GFX_NOT_DEFINED);
@@ -63,9 +89,8 @@ Arduino_GFX *gfx = new Arduino_ST7789(bus, TFT_RST, ROTATION, IPS_MODE, LCD_W, L
 
 
 // ---- Sprite layout ---------------------------------------------------------
-// Layout tuned to match the hello-stranger web reference: sprite occupies
-// ~60% of the frame width, bottom-anchored (figure "stands on" the screen's
-// bottom edge), with the quote bubble floating above in the top ~25%.
+// Layout: top quote bubble (single line) → sprite → bottom interest tag row.
+// Mirrors the web preview composition (quote above, avatar middle, tags below).
 //
 // Source 18×18 → cropped to 13×16 (cols 2..14, rows 2..17). The bottom
 // two rows (16, 17) are preserved because for many poses (e.g.
@@ -73,12 +98,11 @@ Arduino_GFX *gfx = new Arduino_ST7789(bus, TFT_RST, ROTATION, IPS_MODE, LCD_W, L
 // leaves the avatar looking like a floating head. Top row 0–1 stay
 // cropped since most sprites barely use them.
 //
-// Per-cell: 11 px wide × 11 px tall. 11×16 = 176 px tall sprite fits
-// under the bubble region with comfortable headroom. Unifont's native
-// 8×16 glyph is clipped to 11 rows — bottom 5 rows of the glyph are
-// descender/padding, safe to drop.
+// Per-cell: 11 px wide × 11 px tall. Unifont's native 8×16 glyph is
+// clipped to 11 rows — bottom 5 rows of the glyph are descender/padding,
+// safe to drop.
 //
-// Grid: 13×11 = 143 wide, 16×11 = 176 tall → centered, bottom-aligned.
+// Grid: 13×11 = 143 wide, 16×11 = 176 tall → centered, top at y=32.
 #define SPRITE_COL_OFFSET 2
 #define SPRITE_ROW_OFFSET 2
 #define SPRITE_COLS 13
@@ -90,10 +114,14 @@ Arduino_GFX *gfx = new Arduino_ST7789(bus, TFT_RST, ROTATION, IPS_MODE, LCD_W, L
 #define SPRITE_PX_W (CELL_W * SPRITE_COLS)    // 143
 #define SPRITE_PX_H (CELL_H * SPRITE_ROWS)    // 176
 
-// Bottom-anchor sprite to y=236 (4 px from screen bottom). Top of sprite
-// = 236 - 176 = 60 → 60 px of headroom for the quote bubble above.
+// Vertical layout (240 px LCD):
+//   y=  6..28   quote bubble (single line, 22 px) + tail to y=32
+//   y= 32..208  sprite (176 px)
+//   y=212..232  interest tag row (~20 px)
+// Quote is capped to a single line on web (maxlength=14), which freed
+// the headroom that previously held a 2-line bubble (BUBBLE_BOTTOM=48).
 #define SPRITE_ORIGIN_X ((LCD_W - SPRITE_PX_W) / 2)           // 48
-#define SPRITE_ORIGIN_Y (LCD_H - SPRITE_PX_H - 4)             // 60
+#define SPRITE_ORIGIN_Y 32                                    // sprite top
 
 // Animation cadence — matches Web ANIM_INTERVAL_MS.
 #define ANIM_INTERVAL_MS 166
@@ -101,7 +129,7 @@ Arduino_GFX *gfx = new Arduino_ST7789(bus, TFT_RST, ROTATION, IPS_MODE, LCD_W, L
 
 // ---- Palette (mirror of web/colors.json palette[mood][energy]) -------------
 const uint32_t PALETTE[5][6] PROGMEM = {
-  { 0x2a4a52, 0x3a6670, 0x4a8089, 0x3d7bb5, 0x2c5db8, 0x1e3fa8 }, // chill
+  { 0x3d4a2a, 0x5a6b38, 0x7a8a48, 0x8aa84a, 0x9ec040, 0xa8c828 }, // chill
   { 0x2e6670, 0x3e8a98, 0x4faec0, 0x42a8d8, 0x2f95e5, 0x1a7ff0 }, // curious
   { 0x6e3b78, 0x9b4aa5, 0xc865c8, 0xe870c0, 0xf95ca8, 0xff3d8f }, // playful
   { 0x4a4a4a, 0x666663, 0x85837e, 0x9a968d, 0xa8a498, 0xb5b0a0 }, // tired
@@ -142,7 +170,7 @@ uint32_t lightenHex(uint32_t hex) {
 // ---- App state -------------------------------------------------------------
 // Struct type defined near the top of the file (before Arduino IDE's
 // auto-prototype injection point). Here we only instantiate the singleton.
-AvatarState st = { 2, 2, "male", 0, 0, false, "", false };
+AvatarState st = { 2, 2, "male", 0, 0, false, "", {}, 0, false };
 
 String lineBuf;
 uint32_t animFrame = 0;
@@ -152,6 +180,28 @@ uint32_t lastAnimMs = 0;
 // quote changes. Forces a full redraw (background + sprite + quote).
 // Inner-frame ticks only redraw the sprite glyphs.
 bool outerDirty = true;
+
+// ---- Heart rate state -------------------------------------------------------
+// Simple peak-detect over the analog pulse waveform. We track a rolling
+// baseline (DC offset, drifts with finger pressure / ambient light) and
+// declare a beat each time the signal crosses (baseline + HR_RISE_THRESH)
+// from below. The last 3 beat intervals are averaged → BPM.
+//
+// Why this and not a library: the 3-wire pulse sensor outputs raw analog;
+// libraries like PulseSensor expect a specific Arduino timer ISR setup that
+// doesn't translate cleanly to ESP32-C6. A 50 Hz polled detector is good
+// enough for 40-180 BPM range.
+uint32_t hr_lastSampleMs = 0;
+uint32_t hr_lastReportMs = 0;
+int32_t  hr_baselineSum  = 0;       // running sum for baseline window
+int      hr_baselineN    = 0;
+int      hr_baseline     = 2048;    // mid-rail until we have data
+bool     hr_above        = false;   // currently above threshold?
+uint32_t hr_lastBeatMs   = 0;
+uint32_t hr_intervals[3] = {0, 0, 0};
+int      hr_intervalIdx  = 0;
+int      hr_intervalCount = 0;
+int      hr_currentBpm   = 0;
 
 
 // ---- Sprite lookup ---------------------------------------------------------
@@ -271,16 +321,17 @@ void drawGlyphCell(int16_t x, int16_t y, int idx, uint16_t fg, uint16_t bg,
 
 
 // ---- Rendering -------------------------------------------------------------
-// Single-line text: natural 8×16 cells, no bold.
-// Used by boot screen (needs minimum size so full messages fit at all).
-void drawString(int16_t x, int16_t y, const char* s, uint16_t fg, uint16_t bg) {
+// Single-line text: natural 8×16 cells. `bold` doubles each lit pixel
+// rightward (drawGlyphCell handles it) — handy for small UI labels that
+// need more weight against a tinted background.
+void drawString(int16_t x, int16_t y, const char* s, uint16_t fg, uint16_t bg, bool bold = false) {
   size_t i = 0;
   int16_t cx = x;
   while (s[i] != '\0') {
     size_t n = 0;
     uint32_t cp = decodeUtf8(s + i, &n);
     if (n == 0) break;
-    drawGlyphCell(cx, y, glyphIndex(cp), fg, bg, GLYPH_W, GLYPH_H, false);
+    drawGlyphCell(cx, y, glyphIndex(cp), fg, bg, GLYPH_W, GLYPH_H, bold);
     cx += GLYPH_W;
     i += n;
   }
@@ -344,36 +395,6 @@ size_t countCells(const char* s) {
   return cells;
 }
 
-// Find a "nice" break point in the quote.
-//
-// Goal: fill line 1 as much as possible. A space is a prettier break than
-// a hard cut, but only if it's in the rightmost ~third of the line —
-// otherwise we'd strand the first line with way fewer chars than needed
-// (e.g. "want quietwant..." would break at cells=4 after "want", leaving
-// line 1 = 4 cells and stuffing the rest into line 2).
-//
-// Rule: walk to cell `max_cells`; if the last space we saw is in
-// cells [max_cells*2/3 .. max_cells], break there. Otherwise hard-cut.
-size_t findLineBreak(const char* s, size_t total_cells, size_t max_cells) {
-  if (total_cells <= max_cells) return total_cells;
-  size_t i = 0, cells = 0, last_space_cells = 0;
-  bool saw_space = false;
-  while (s[i] != '\0' && cells < max_cells) {
-    size_t n = 0;
-    uint32_t cp = decodeUtf8(s + i, &n);
-    if (n == 0) break;
-    if (cp == ' ') {
-      saw_space = true;
-      last_space_cells = cells;
-    }
-    cells++;
-    i += n;
-  }
-  size_t min_space_pos = (max_cells * 2) / 3;  // only trust spaces in last 1/3
-  if (saw_space && last_space_cells >= min_space_pos) return last_space_cells;
-  return max_cells;  // hard cut — line 1 is full
-}
-
 void renderWaiting() {
   gfx->fillScreen(RGB565_BLACK);
   drawString(30, 96,  "waiting for",    RGB565_WHITE, RGB565_BLACK);
@@ -430,66 +451,32 @@ void drawSprite(const char* frame_pgm, uint16_t bg_color, uint16_t fg_color) {
 }
 
 // Quote bubble — rendered with 16×16 glyphs (2× scale, chunky pixel-art feel).
-// Layout: BOTTOM-anchored to a fixed y, so single-line quotes always sit in
-// the same spot; longer quotes wrap to 2 lines and grow upward instead.
-//
-// Word-wrap: splits on the last space before the max-width if possible,
-// otherwise hard-cuts. Lines past 2 are silently truncated (we never
-// have more than ~28 chars of useful quote anyway).
+// Single-line only: web caps input at 14 chars (matches MAX_PER_LINE), so
+// any longer string is hard-truncated at the cell count cap.
+// BOTTOM-anchored to y=28 — leaves y=32 onwards for the sprite.
 void drawQuoteBubble(uint16_t bg_color, uint16_t fg_color) {
   if (st.quote.length() == 0) return;
 
   const char* quote = st.quote.c_str();
 
-  // Sizing constants. 16 px per 2× glyph cell + 3 px padding on each side
-  // fits 14 cells per line (14×16 + 2×3 = 230 px bubble, 5 px margin to
-  // each screen edge). Going to 15 cells (15×16 + 2×3 = 246) overflows.
+  // Sizing. 16 px per 2× glyph cell + 3 px padding on each side fits
+  // 14 cells (14×16 + 2×3 = 230 px bubble, 5 px margin to each screen edge).
   const int16_t GLYPH_2X_W   = 16;
   const int16_t GLYPH_2X_H   = 16;
   const int16_t PAD          = 3;
   const size_t  MAX_PER_LINE = 14;
-  // Bubble floor y: leave BUBBLE_BOTTOM + TAIL_H < SPRITE_ORIGIN_Y (= 60)
-  // so the tail tip never visually collides with the sprite's head row.
-  const int16_t BUBBLE_BOTTOM = 48;
-  const int16_t TAIL_H        = 6;   // tip at y = 48 + 6 - 1 = 53, 7 px from sprite top
+  // Bubble floor + tail must stay above SPRITE_ORIGIN_Y (= 32):
+  // BUBBLE_BOTTOM (28) + TAIL_H (4) = 32 → tail tip touches sprite top edge.
+  const int16_t BUBBLE_BOTTOM = 28;
+  const int16_t TAIL_H        = 4;
 
   size_t total_cells = countCells(quote);
+  if (total_cells > MAX_PER_LINE) total_cells = MAX_PER_LINE;
 
-  // Decide 1-line vs 2-line layout.
-  size_t line1_cells;
-  size_t line2_cells;
-  const char* line2_start = nullptr;  // points into `quote`
-
-  if (total_cells <= MAX_PER_LINE) {
-    line1_cells = total_cells;
-    line2_cells = 0;
-  } else {
-    // Find a break point — prefer last space at or before MAX_PER_LINE.
-    line1_cells = findLineBreak(quote, total_cells, MAX_PER_LINE);
-    // Walk forward to the byte after line1_cells codepoints.
-    size_t byte_i = 0, cells_i = 0;
-    while (quote[byte_i] != '\0' && cells_i < line1_cells) {
-      size_t n = 0;
-      decodeUtf8(quote + byte_i, &n);
-      if (n == 0) break;
-      byte_i += n;
-      cells_i++;
-    }
-    // Skip a single space after the break so the second line doesn't
-    // start with a leading space.
-    if (quote[byte_i] == ' ') byte_i++;
-    line2_start = quote + byte_i;
-    line2_cells = countCells(line2_start);
-    if (line2_cells > MAX_PER_LINE) line2_cells = MAX_PER_LINE;  // hard truncate
-  }
-
-  // Bubble dimensions — grows UPWARD from BUBBLE_BOTTOM when 2 lines.
-  int  n_lines      = (line2_cells > 0) ? 2 : 1;
-  int16_t inner_h   = n_lines * GLYPH_2X_H;
-  int16_t bh        = inner_h + PAD * 2;
-  int16_t max_cells = (line1_cells > line2_cells) ? line1_cells : line2_cells;
-  int16_t inner_w   = (int16_t)max_cells * GLYPH_2X_W;
-  int16_t bw        = inner_w + PAD * 2;
+  int16_t inner_h = GLYPH_2X_H;
+  int16_t bh      = inner_h + PAD * 2;
+  int16_t inner_w = (int16_t)total_cells * GLYPH_2X_W;
+  int16_t bw      = inner_w + PAD * 2;
 
   int16_t bx = (LCD_W - bw) / 2;
   int16_t by = BUBBLE_BOTTOM - bh;    // anchor to bottom
@@ -506,18 +493,47 @@ void drawQuoteBubble(uint16_t bg_color, uint16_t fg_color) {
   gfx->drawLine(tipX + 4, tailTop, tipX, tailTop + TAIL_H, fg_color);
   gfx->drawLine(tipX - 3, tailTop, tipX + 3, tailTop, bg_color);
 
-  // Left-align both lines against the bubble's inner left edge. When the
-  // second line is shorter than the first, it stays hugged to the left
-  // (not centered), matching the feel of a typed-out message rather than
-  // a logo/title block.
   int16_t text_x = bx + PAD;
-  int16_t line1_y = by + PAD;
-  drawString2x(text_x, line1_y, quote, line1_cells, fg_color, bg_color);
+  int16_t text_y = by + PAD;
+  drawString2x(text_x, text_y, quote, total_cells, fg_color, bg_color);
+}
 
-  if (line2_cells > 0) {
-    int16_t line2_y = by + PAD + GLYPH_2X_H;
-    drawString2x(text_x, line2_y, line2_start, line2_cells, fg_color, bg_color);
+// Interest tag row — bottom of screen, mirrors web's #preview-interests row.
+// Format: "<icon> <label>  <icon> <label>  <icon> <label>" (double-space
+// separator between tags). U+00B7 middot isn't in glyphs.h so we keep it
+// ASCII-only.
+//
+// Width budget: 240 px / 8 px per cell = 30 cells. Worst-case 3 tags
+// (`♠ gaming  ✈ travel  ◉ photo`) ≈ 27 cells. Web caps at 3 selections
+// so we don't have to handle overflow gracefully — just clip if needed.
+void drawInterestRow(uint16_t bg_color, uint16_t fg_color) {
+  if (st.interest_count == 0) return;
+
+  // Build the row into a buffer so we can compute total width once and
+  // center the whole line. Buffer sized for worst case (3 tags × ~10 cells
+  // × 4 bytes/UTF-8 + separators) with comfortable margin.
+  char buf[96];
+  size_t bi = 0;
+  for (int i = 0; i < st.interest_count && bi + 24 < sizeof(buf); i++) {
+    if (i > 0) {
+      buf[bi++] = ' ';
+      buf[bi++] = ' ';
+    }
+    const char* icon  = st.interests[i].icon.c_str();
+    const char* label = st.interests[i].label.c_str();
+    while (*icon  && bi + 1 < sizeof(buf)) buf[bi++] = *icon++;
+    if (bi + 1 < sizeof(buf)) buf[bi++] = ' ';
+    while (*label && bi + 1 < sizeof(buf)) buf[bi++] = *label++;
   }
+  buf[bi] = '\0';
+
+  size_t cells = countCells(buf);
+  int16_t row_w = (int16_t)cells * GLYPH_W;
+  int16_t x = (LCD_W - row_w) / 2;
+  if (x < 0) x = 0;                    // clip-left if it overflows
+  int16_t y = 212;                     // sprite ends at 208; 4 px gap
+
+  drawString(x, y, buf, fg_color, bg_color, /*bold=*/true);
 }
 
 // Full redraw — used when outer state (mood/energy/sprite identity/quote) changes.
@@ -552,6 +568,7 @@ void renderFull() {
   }
 
   drawQuoteBubble(bgSoft565, mainCol565);
+  drawInterestRow(bgSoft565, mainCol565);
 }
 
 // Inner-frame redraw — only the sprite area, bubble untouched.
@@ -579,7 +596,9 @@ void renderSpriteOnly() {
 
 // ---- Serial line parsing ---------------------------------------------------
 void handleLine(const String &line) {
-  StaticJsonDocument<384> doc;
+  // 512 B leaves headroom for the interests array (up to 3 × {icon,label}
+  // on top of the base ~130 B payload). Bump if new fields are added.
+  StaticJsonDocument<512> doc;
   DeserializationError err = deserializeJson(doc, line);
   if (err) {
     Serial.printf("[serial_avatar] JSON parse err: %s\n", err.c_str());
@@ -594,11 +613,91 @@ void handleLine(const String &line) {
   if (doc["sex"].is<const char*>())         st.sex    = String((const char*)doc["sex"]);
   if (doc["quote"].is<const char*>())       st.quote  = String((const char*)doc["quote"]);
 
+  // Interests: optional array of {icon, label}. Absent key → clear.
+  // Missing/non-object entries silently skipped; max MAX_INTERESTS kept.
+  st.interest_count = 0;
+  if (doc["interests"].is<JsonArray>()) {
+    for (JsonObject tag : doc["interests"].as<JsonArray>()) {
+      if (st.interest_count >= MAX_INTERESTS) break;
+      const char* icon  = tag["icon"]  | "";
+      const char* label = tag["label"] | "";
+      if (icon[0] == '\0' && label[0] == '\0') continue;
+      st.interests[st.interest_count].icon  = String(icon);
+      st.interests[st.interest_count].label = String(label);
+      st.interest_count++;
+    }
+  }
+
   st.valid = true;
   outerDirty = true;
 
-  Serial.printf("[serial_avatar] OK mood=%d energy=%d sex=%s color=%d num=%d smile=%d quote=\"%s\"\n",
-                st.mood, st.energy, st.sex.c_str(), st.color, st.num, st.smile, st.quote.c_str());
+  Serial.printf("[serial_avatar] OK mood=%d energy=%d sex=%s color=%d num=%d smile=%d quote=\"%s\" interests=%d\n",
+                st.mood, st.energy, st.sex.c_str(), st.color, st.num, st.smile, st.quote.c_str(), st.interest_count);
+}
+
+
+// ---- Heart rate detection --------------------------------------------------
+// Polled at 50 Hz. Updates hr_currentBpm in-place. Call from loop().
+void hrTick(uint32_t now) {
+  if (now - hr_lastSampleMs < HR_SAMPLE_MS) return;
+  hr_lastSampleMs = now;
+
+  int v = analogRead(HR_PIN);   // ESP32 default: 0..4095, 12-bit
+
+#if HR_DEBUG
+  // Throttled raw dump for threshold tuning. Format: line per 200 ms.
+  // Watch the spread (max-min) over a few seconds — peak amplitude
+  // tells you what HR_RISE_THRESH should be.
+  static uint32_t hr_dbgLastMs = 0;
+  if (now - hr_dbgLastMs >= 200) {
+    hr_dbgLastMs = now;
+    Serial.printf("[hr] raw=%4d  base=%4d  diff=%+4d\n", v, hr_baseline, v - hr_baseline);
+  }
+#endif
+
+  // Baseline tracking: rolling mean over HR_BASELINE_N samples.
+  hr_baselineSum += v;
+  hr_baselineN++;
+  if (hr_baselineN >= HR_BASELINE_N) {
+    hr_baseline = hr_baselineSum / hr_baselineN;
+    hr_baselineSum = 0;
+    hr_baselineN = 0;
+  }
+
+  // Edge detect: signal crossing baseline+threshold from below = beat.
+  bool above = (v > hr_baseline + HR_RISE_THRESH);
+  if (above && !hr_above) {
+    // Rising edge → candidate beat. Reject if too soon (would imply >200 BPM).
+    if (hr_lastBeatMs != 0 && (now - hr_lastBeatMs) > 300) {
+      uint32_t interval = now - hr_lastBeatMs;
+      hr_intervals[hr_intervalIdx] = interval;
+      hr_intervalIdx = (hr_intervalIdx + 1) % 3;
+      if (hr_intervalCount < 3) hr_intervalCount++;
+
+      // Compute BPM from the average of available intervals.
+      uint32_t sum = 0;
+      for (int i = 0; i < hr_intervalCount; i++) sum += hr_intervals[i];
+      uint32_t avg = sum / hr_intervalCount;
+      if (avg > 0) hr_currentBpm = (int)(60000UL / avg);
+    }
+    hr_lastBeatMs = now;
+  }
+  hr_above = above;
+
+  // If no beat for 3 s, declare "no signal" (finger lifted).
+  if (hr_lastBeatMs != 0 && (now - hr_lastBeatMs) > 3000) {
+    hr_currentBpm = 0;
+    hr_intervalCount = 0;
+  }
+}
+
+// Periodically push current BPM to web. Cheap one-line JSON; web ignores
+// it if it has no listener. Always emit (even bpm=0) so the web side knows
+// we're alive and can show "no finger detected".
+void hrReport(uint32_t now) {
+  if (now - hr_lastReportMs < HR_REPORT_MS) return;
+  hr_lastReportMs = now;
+  Serial.printf("{\"hr\":%d}\n", hr_currentBpm);
 }
 
 
@@ -615,6 +714,11 @@ void setup() {
     Serial.println("[serial_avatar] gfx->begin() FAILED");
     while (1) delay(1000);
   }
+
+  // Heart rate ADC. analogReadResolution sets 12-bit (default on ESP32-C6
+  // anyway, but explicit avoids surprises if Arduino-ESP32 changes default).
+  pinMode(HR_PIN, INPUT);
+  analogReadResolution(12);
 
   renderWaiting();
   Serial.printf("[serial_avatar] ready — %d sprites loaded\n", SPRITES_COUNT);
@@ -639,8 +743,15 @@ void loop() {
     renderFull();
   }
 
-  // Inner-frame animation
   uint32_t now = millis();
+
+  // Heart rate sampling + periodic report. Independent of sprite state —
+  // runs even before web has connected, so the first connect can pick up
+  // a valid BPM immediately.
+  hrTick(now);
+  hrReport(now);
+
+  // Inner-frame animation
   if (st.valid && (now - lastAnimMs >= ANIM_INTERVAL_MS)) {
     lastAnimMs = now;
     animFrame++;

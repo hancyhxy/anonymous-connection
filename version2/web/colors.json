@@ -6,7 +6,7 @@
   },
 
   "mood": {
-    "0": { "key": "chill",    "note": "cool / pensive — teal → indigo. The 'blue-green' family the user associates with sadness/withdrawn." },
+    "0": { "key": "chill",    "note": "relaxed / grounded — olive → chartreuse. Yellow-green family with a subtle highlighter feel; separated from curious's blue so the two moods read distinctly." },
     "1": { "key": "curious",  "note": "alert / open — cyan → sky blue." },
     "2": { "key": "playful",  "note": "HAPPY — magenta → pink → hot pink. The user's 'purple-pink' family for joy." },
     "3": { "key": "tired",    "note": "drained — grey → warm grey → taupe. The user's 'grey' family for exhaustion." },
@@ -15,12 +15,12 @@
 
   "palette": {
     "0": {
-      "0": { "key": "chill-empty",    "hex": "#2a4a52" },
-      "1": { "key": "chill-low",      "hex": "#3a6670" },
-      "2": { "key": "chill-medium",   "hex": "#4a8089" },
-      "3": { "key": "chill-steady",   "hex": "#3d7bb5" },
-      "4": { "key": "chill-high",     "hex": "#2c5db8" },
-      "5": { "key": "chill-electric", "hex": "#1e3fa8" }
+      "0": { "key": "chill-empty",    "hex": "#3d4a2a" },
+      "1": { "key": "chill-low",      "hex": "#5a6b38" },
+      "2": { "key": "chill-medium",   "hex": "#7a8a48" },
+      "3": { "key": "chill-steady",   "hex": "#8aa84a" },
+      "4": { "key": "chill-high",     "hex": "#9ec040" },
+      "5": { "key": "chill-electric", "hex": "#a8c828" }
     },
     "1": {
       "0": { "key": "curious-empty",    "hex": "#2e6670" },
