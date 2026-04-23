@@ -12,7 +12,7 @@
 //   3. smile     — 2 (neutral/smile — independent dim since v5)
 //   4. mood      — 5 (vibe tag; no longer affects animation)
 //   5. bg_level  — 6 (energy; SINGLE color source)
-//   6. quote     — free text, 28 ASCII chars
+//   6. quote     — free text, 14 ASCII chars (single-line on device)
 //
 // Internal sprite matrix stays 2 × 5 × 3 × 2 = 60 keys
 // (sex_color_num[smile]), unchanged — only the UI collapses.
@@ -49,8 +49,12 @@ const state = {
   mood: 0,          // vibe tag; no longer drives anything in v5+
   bg_level: 2,
   quote: "",
-  interests: [],    // v7: Q_INTERESTS — up to 3 tag values. Web-only for now,
-                    // not included in the device sync payload.
+  interests: [],    // v7: Q_INTERESTS — up to 3 primary tag values.
+                    // Sent to device (icon+label) for hardware tag row.
+  interest_details: {},  // v8: Q_INTERESTS_DETAIL — { primary: [subtag, ...] }.
+                         // Collected for the collective-view similarity layout
+                         // ONLY. Never rendered on phone preview, hardware
+                         // LCD, or wall. Excluded from syncDevice() payload.
 };
 const MAX_INTERESTS = 3;
 
@@ -59,6 +63,26 @@ const MAX_INTERESTS = 3;
 let animFrame = 0;
 
 const ENERGY_LABELS = ["empty", "low", "medium", "steady", "high", "electric"];
+
+// Heart-rate → energy mapping (firmware reports BPM via {"hr":N} on serial).
+// Tuned for "person sitting calmly" rather than gym/cardio: the medium band
+// (70-85 BPM) covers a typical resting adult, giving the avatar a stable
+// "default" color when no excitement happens.
+//
+// 0 = no signal (finger lifted) — leaves bg_level at last user-set value.
+function bpmToEnergy(bpm) {
+  if (bpm <= 0)   return null;     // no signal → don't override
+  if (bpm < 60)   return 0;        // empty    — deep relaxation
+  if (bpm < 70)   return 1;        // low      — quiet
+  if (bpm < 85)   return 2;        // medium   — typical resting
+  if (bpm < 100)  return 3;        // steady   — mildly active
+  if (bpm < 115)  return 4;        // high     — excited
+  return 5;                        // electric — strong / running
+}
+
+// Most recent BPM reported by device. Null = no reading yet (or finger
+// lifted). UI uses this to show the "♥ 78 bpm" readout.
+let lastBpm = null;
 
 let sprites = null;
 let colors = null;
@@ -200,6 +224,9 @@ function rerender() {
 // Wire-format field name is `energy`, not `bg_level` — a holdover from an
 // earlier prototype. Translate here rather than renaming the UI state.
 function syncDevice() {
+  // Persist to sessionStorage on every user-driven state change, so an
+  // accidental refresh restores the in-progress profile. Submit clears it.
+  saveSessionState();
   sendState({
     sex:    state.sex,
     color:  state.color,
@@ -208,7 +235,21 @@ function syncDevice() {
     mood:   state.mood,
     energy: state.bg_level,
     quote:  state.quote,
+    interests: buildInterestsPayload(),
   });
+}
+
+// Resolve state.interests (array of value strings) into the {icon,label}
+// objects the device needs. Sending the icon char directly keeps the
+// firmware free of any value→icon mapping table — questions.json stays
+// the single source of truth.
+function buildInterestsPayload() {
+  if (!state.interests.length || !questions) return [];
+  const byValue = new Map(questions.Q_INTERESTS.options.map(o => [o.value, o]));
+  return state.interests
+    .map(v => byValue.get(v))
+    .filter(Boolean)
+    .map(o => ({ icon: o.icon, label: o.label }));
 }
 
 
@@ -277,6 +318,45 @@ function wireEnergy() {
   handler();
 }
 
+// Called every time firmware reports {"hr":N} (~1 Hz). Maps BPM to a
+// 0-5 energy bucket and pushes it through the same path as a slider drag.
+// When bpm=0 (no finger) we leave bg_level alone so the avatar doesn't
+// flicker between "no signal" and "low".
+function handleHeartRate(bpm) {
+  lastBpm = bpm;
+  updateHeartRateReadout();
+  const energy = bpmToEnergy(bpm);
+  if (energy === null) return;
+  if (energy === state.bg_level) return;          // no-op, skip rerender
+  state.bg_level = energy;
+  const slider = document.getElementById("slider-energy");
+  const label  = document.getElementById("slider-energy-label");
+  if (slider) slider.value = String(energy);
+  if (label)  label.textContent = ENERGY_LABELS[energy] ?? "—";
+  rerender();
+  syncDevice();
+}
+
+// Render the "♥ 78 bpm · medium" readout (or "no finger detected"), and
+// flip the slider between editable (no signal) and read-only (sensor live).
+// The slider stays a manual fallback so demos without hardware keep working.
+function updateHeartRateReadout() {
+  const el = document.getElementById("hr-readout");
+  const slider = document.getElementById("slider-energy");
+  const live = (lastBpm !== null && lastBpm > 0);
+  if (el) {
+    if (!live) {
+      el.textContent = "♥ — no signal";
+      el.classList.remove("active");
+    } else {
+      const lvl = ENERGY_LABELS[bpmToEnergy(lastBpm) ?? 2] ?? "—";
+      el.textContent = `♥ ${lastBpm} bpm · ${lvl}`;
+      el.classList.add("active");
+    }
+  }
+  if (slider) slider.disabled = live;
+}
+
 // Rebuild the preview's interest row from state.interests.
 // Called after any selection change in wireInterests, and once on boot.
 // Format: "♪ music · ▶ film · ☕ food" — hidden when empty.
@@ -340,7 +420,77 @@ function wireInterests() {
       tag.setAttribute("aria-checked", "true");
     }
     renderPreviewInterests();
-    // No syncDevice — interests are web-only; device sync payload unchanged.
+    syncDevice();
+    renderInterestSubtags();
+  });
+}
+
+// Q_INTERESTS_DETAIL (v8): for each currently-selected primary interest,
+// render a row of pill buttons with that primary's subtags. Toggling a
+// pill updates state.interest_details[primary]. Subtag selection is
+// optional (zero-or-more), so there's no max-cap or hint.
+//
+// The whole fieldset hides when no primary is selected. When a primary
+// is deselected we also drop its detail entry to keep state.interest_details
+// in sync with state.interests.
+function renderInterestSubtags() {
+  const fs = document.getElementById("qblock-subtags");
+  const container = document.getElementById("opts-subtags");
+  if (!fs || !container || !questions) return;
+
+  // Drop entries for primaries that are no longer selected.
+  for (const k of Object.keys(state.interest_details)) {
+    if (!state.interests.includes(k)) delete state.interest_details[k];
+  }
+
+  if (state.interests.length === 0) {
+    fs.hidden = true;
+    container.innerHTML = "";
+    return;
+  }
+  fs.hidden = false;
+
+  const byValue = new Map(questions.Q_INTERESTS.options.map(o => [o.value, o]));
+  const groups = state.interests.map(primary => {
+    const opt = byValue.get(primary);
+    if (!opt || !opt.subtags) return "";
+    const picked = state.interest_details[primary] || [];
+    const pills = opt.subtags.map(sub => {
+      const sel = picked.includes(sub) ? " selected" : "";
+      return `<button type="button" class="subtag-pill${sel}" `
+           + `data-primary="${primary}" data-subtag="${sub}" `
+           + `aria-pressed="${picked.includes(sub) ? "true" : "false"}">${sub}</button>`;
+    }).join("");
+    return `<div class="subtag-group">
+              <div class="subtag-group-label"><span class="subtag-icon">${opt.icon}</span>${opt.label}</div>
+              <div class="subtag-pills">${pills}</div>
+            </div>`;
+  }).join("");
+  container.innerHTML = groups;
+}
+
+function wireInterestSubtags() {
+  const container = document.getElementById("opts-subtags");
+  if (!container) return;
+  container.addEventListener("click", (e) => {
+    const pill = e.target.closest(".subtag-pill");
+    if (!pill) return;
+    const primary = pill.dataset.primary;
+    const subtag  = pill.dataset.subtag;
+    const list = state.interest_details[primary] || (state.interest_details[primary] = []);
+    const idx = list.indexOf(subtag);
+    if (idx !== -1) {
+      list.splice(idx, 1);
+      pill.classList.remove("selected");
+      pill.setAttribute("aria-pressed", "false");
+    } else {
+      list.push(subtag);
+      pill.classList.add("selected");
+      pill.setAttribute("aria-pressed", "true");
+    }
+    // Subtags are NOT sent to device or rendered in preview — collective
+    // view consumes them on submit. No syncDevice / rerender needed.
+    saveSessionState();
   });
 }
 
@@ -366,16 +516,107 @@ function wireQuote() {
 
 
 // -------------------------------------------------------------
+// Persistence — sessionStorage keeps the in-progress profile across
+// accidental refreshes. Cleared once a successful /submit happens so
+// the next visitor on the same phone gets a fresh form.
+// -------------------------------------------------------------
+const SESSION_KEY = "xy_profile_v8";
+
+function saveSessionState() {
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(state)); }
+  catch (_) { /* quota/permission — ignore */ }
+}
+
+function loadSessionState() {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return;
+    const saved = JSON.parse(raw);
+    // Whitelisted merge: only restore known fields, skip anything else
+    // so a stale schema can't corrupt current state.
+    for (const k of ["sex","color","num","smile","mood","bg_level","quote","interests","interest_details"]) {
+      if (k in saved) state[k] = saved[k];
+    }
+  } catch (_) { /* malformed — ignore */ }
+}
+
+function clearSessionState() {
+  try { sessionStorage.removeItem(SESSION_KEY); } catch (_) {}
+}
+
+
+// -------------------------------------------------------------
+// Submit — POST current full state (incl. interest_details) to the
+// Flask backend. Disable the button on success to block accidental
+// double submits; sessionStorage is wiped so a refresh after submit
+// doesn't reload the same profile.
+// -------------------------------------------------------------
+function wireSubmit() {
+  const btn = document.getElementById("btn-submit");
+  const status = document.getElementById("submit-status");
+  if (!btn || !status) return;
+
+  // Match what the backend stores. Mirrors syncDevice() field set
+  // PLUS interest_details, which the device doesn't get.
+  const buildSubmitPayload = () => ({
+    sex:               state.sex,
+    color:             state.color,
+    num:               state.num,
+    smile:             state.smile,
+    mood:              state.mood,
+    bg_level:          state.bg_level,
+    quote:             state.quote,
+    interests:         state.interests,
+    interest_details:  state.interest_details,
+  });
+
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    status.className = "submit-status";
+    status.textContent = "submitting…";
+
+    try {
+      const res = await fetch("/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(buildSubmitPayload()),
+      });
+      if (!res.ok) throw new Error(`server replied ${res.status}`);
+      status.className = "submit-status success";
+      status.textContent = "submitted ✓ check the wall";
+      clearSessionState();
+      // Leave button disabled — they shouldn't submit twice this session.
+    } catch (err) {
+      console.error(err);
+      btn.disabled = false;
+      status.className = "submit-status error";
+      status.textContent = `submit failed — ${err.message}`;
+    }
+  });
+}
+
+
+// -------------------------------------------------------------
 // Main
 // -------------------------------------------------------------
 async function main() {
   try {
     await loadData();
+
+    // Restore in-progress profile from sessionStorage BEFORE populating any
+    // selected/highlighted UI so initial DOM reflects the restored state.
+    loadSessionState();
+
     populateAvatarGallery();
     populateSmile();
     populateMood();
     populateInterests();
     populateQuoteSuggestions();
+
+    // Restore quote input value if state has one (other UI repaints itself
+    // via the next rerender + populate* paths).
+    const quoteInput = document.getElementById("input-quote");
+    if (quoteInput && state.quote) quoteInput.value = state.quote;
 
     wireSex();
     wireAvatarGallery();
@@ -383,13 +624,24 @@ async function main() {
     wireDelegated("opts-mood",  "mood",  "mood");
     wireEnergy();
     wireInterests();
+    wireInterestSubtags();
+    renderInterestSubtags();   // populates from restored state.interests
+    renderPreviewInterests();  // restored primaries reflect on preview row
     wireQuote();
+    wireSubmit();
 
     // USB Serial connect button. Once connected, the device:connected
     // event flushes current state, so the board doesn't stay stuck on
     // its boot "waiting..." screen even if the user doesn't touch anything.
     connectUI();
     window.addEventListener("device:connected", syncDevice);
+
+    // Heart rate from device → drives bg_level (energy). The slider UI
+    // becomes a read-only readout when a BPM is being received.
+    window.addEventListener("device:message", (e) => {
+      const msg = e.detail;
+      if (typeof msg.hr === "number") handleHeartRate(msg.hr);
+    });
 
     startAnimation();
     rerender();

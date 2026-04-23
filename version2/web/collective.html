@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>collective wall — anonymous avatar</title>
+  <link rel="stylesheet" href="collective.css">
+</head>
+<body>
+  <main id="stage" aria-label="Collective avatar wall">
+    <!-- avatar tiles inserted by collective.js, absolutely positioned. -->
+  </main>
+
+  <!-- Scan-to-join card. Bottom-left corner. Stays visible at all times
+       so latecomers can still join mid-session; opacity reduces once
+       avatars start populating so it doesn't fight for attention. -->
+  <div id="qr-card" class="qr-card">
+    <img src="/api/qr" alt="Scan to join" class="qr-img">
+    <div class="qr-caption">scan to join</div>
+  </div>
+
+  <!-- bottom-corner counter; hidden if you'd rather a pure visual -->
+  <div id="status-pill" class="status-pill">
+    <span id="count">0</span> profiles
+  </div>
+
+  <!-- Live layout tuner. Panel.collapsed via header button. State persists
+       in localStorage so it stays the way you left it across reloads. -->
+  <aside id="debug-panel" aria-label="Layout debug panel">
+    <header class="debug-header">
+      <span class="debug-title">layout</span>
+      <button type="button" id="debug-toggle" aria-label="collapse">▾</button>
+    </header>
+    <div class="debug-body">
+
+      <label class="debug-row">
+        <span class="debug-label">tile size</span>
+        <input type="range" id="t-tileSize" min="60" max="220" step="2">
+        <span class="debug-value" id="v-tileSize">110</span>
+      </label>
+      <div class="debug-hint">size of each avatar tile</div>
+
+      <label class="debug-row">
+        <span class="debug-label">collision pad</span>
+        <input type="range" id="t-collisionPad" min="-100" max="120" step="2">
+        <span class="debug-value" id="v-collisionPad">6</span>
+      </label>
+      <div class="debug-hint">how close two tiles can get</div>
+
+      <label class="debug-row">
+        <span class="debug-label">rest base</span>
+        <input type="range" id="t-restBase" min="120" max="700" step="10">
+        <span class="debug-value" id="v-restBase">360</span>
+      </label>
+      <div class="debug-hint">distance between them</div>
+
+      <label class="debug-row">
+        <span class="debug-label">score weight</span>
+        <input type="range" id="t-scoreK" min="0.05" max="1.5" step="0.05">
+        <span class="debug-value" id="v-scoreK">0.35</span>
+      </label>
+      <div class="debug-hint">how strongly similarity pulls them together</div>
+
+      <button type="button" id="debug-clear-data" class="debug-clear">clear all profiles</button>
+      <button type="button" id="debug-reset" class="debug-reset">reset to defaults</button>
+    </div>
+  </aside>
+
+  <script type="module" src="collective.js"></script>
+</body>
+</html>

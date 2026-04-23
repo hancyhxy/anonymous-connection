@@ -145,7 +145,9 @@ async function cleanup() {
 
 
 // ------------------------------------------------------------------
-// Read loop — passes device stdout to console.log for debugging.
+// Read loop — logs every line, and forwards JSON-shaped lines as
+// `device:message` CustomEvents so app.js can react to telemetry
+// (heart rate, etc.) without polling.
 // ------------------------------------------------------------------
 async function startReadLoop(signal) {
   const decoder = new TextDecoderStream();
@@ -163,7 +165,16 @@ async function startReadLoop(signal) {
       while ((idx = buf.indexOf("\n")) >= 0) {
         const line = buf.slice(0, idx).replace(/\r$/, "");
         buf = buf.slice(idx + 1);
-        if (line.length > 0) console.log("[device]", line);
+        if (line.length === 0) continue;
+        console.log("[device]", line);
+        // Forward JSON lines (start with `{`) as events. Tolerant: a
+        // malformed JSON just gets logged, no exception.
+        if (line[0] === "{") {
+          try {
+            const msg = JSON.parse(line);
+            window.dispatchEvent(new CustomEvent("device:message", { detail: msg }));
+          } catch (_) { /* not JSON, ignore */ }
+        }
       }
     }
   } catch (err) {

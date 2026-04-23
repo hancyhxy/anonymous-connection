@@ -58,13 +58,16 @@
         </div>
       </fieldset>
 
-      <!-- Q_ENERGY: background energy level slider -->
+      <!-- Q_ENERGY: background energy level — driven by heart rate when a
+           sensor is connected (see #hr-readout below). The slider stays as
+           a manual fallback for offline / no-sensor demos. -->
       <fieldset class="qblock" data-q="Q_ENERGY">
         <legend>what's your energy level?</legend>
         <div class="slider-row">
           <input type="range" id="slider-energy" min="0" max="5" step="1" value="2">
           <span class="slider-label" id="slider-energy-label">medium</span>
         </div>
+        <div class="hr-readout" id="hr-readout">♥ — no signal</div>
       </fieldset>
 
       <!-- Q_INTERESTS: multi-select tag picker, max 3 -->
@@ -76,15 +79,33 @@
         <div class="interest-hint" id="interests-hint" aria-live="polite"></div>
       </fieldset>
 
+      <!-- Q_INTERESTS_DETAIL: per-primary subtag picker. Hidden until user
+           picks at least one primary interest. Subtag selections drive the
+           collective-view similarity layout but are NEVER rendered on any
+           preview (phone, hardware, or wall). -->
+      <fieldset class="qblock" data-q="Q_INTERESTS_DETAIL" id="qblock-subtags" hidden>
+        <legend>get more specific (optional)</legend>
+        <div id="opts-subtags">
+          <!-- populated by app.js as primaries are chosen -->
+        </div>
+      </fieldset>
+
       <!-- Q_QUOTE: free text -->
       <fieldset class="qblock" data-q="Q_QUOTE">
         <legend>what are you thinking?</legend>
-        <input type="text" id="input-quote" maxlength="28"
-               placeholder="28 chars, ASCII only"
+        <input type="text" id="input-quote" maxlength="14"
+               placeholder="14 chars, ASCII only"
                autocomplete="off">
         <div class="suggestions" id="quote-suggestions">
           <!-- populated by app.js -->
         </div>
+      </fieldset>
+
+      <!-- Submit to wall — POST current state to /submit. Disabled after
+           a successful submit to prevent duplicate entries. -->
+      <fieldset class="qblock submit-block">
+        <button id="btn-submit" type="button">submit to the wall</button>
+        <div id="submit-status" class="submit-status" aria-live="polite"></div>
       </fieldset>
 
       <!-- attribution -->

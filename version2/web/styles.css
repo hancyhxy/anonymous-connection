@@ -205,6 +205,96 @@ html, body {
   opacity: 1;
 }
 
+/* ──────────────────────────────────────────────
+   Q_INTERESTS_DETAIL (v8) — second-level subtag picker.
+   Reveals a row per selected primary. Pills inherit the .choice
+   visual language so the form reads as a continuation of the
+   primary grid rather than a new interaction pattern.
+   These selections feed the collective-view similarity layout
+   only — never rendered on any preview.
+   ────────────────────────────────────────────── */
+.subtag-group {
+  margin-bottom: 14px;
+}
+.subtag-group:last-child {
+  margin-bottom: 0;
+}
+.subtag-group-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  letter-spacing: 0.04em;
+}
+.subtag-icon {
+  font-variant-emoji: text;
+  opacity: 0.85;
+}
+.subtag-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.subtag-pill {
+  padding: 5px 11px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  transition: border-color 0.15s, background 0.15s;
+  font: inherit;
+  font-size: 0.82rem;
+}
+.subtag-pill:hover {
+  border-color: #555;
+}
+.subtag-pill.selected {
+  border-color: var(--accent);
+  background: rgba(126, 200, 227, 0.15);
+}
+
+/* ──────────────────────────────────────────────
+   Submit button — sends the full state (incl. interest_details)
+   to /submit. After success it stays disabled to avoid duplicate
+   entries; sessionStorage gates a second submit too.
+   ────────────────────────────────────────────── */
+.submit-block {
+  margin-top: 8px;
+}
+.submit-block button {
+  width: 100%;
+  padding: 14px 16px;
+  background: var(--accent);
+  color: var(--bg-page);
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+  font-family: inherit;
+}
+.submit-block button:hover:not(:disabled) {
+  background: #9bd6e8;
+}
+.submit-block button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.submit-status {
+  margin-top: 10px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  min-height: 1.2em;
+}
+.submit-status.success { color: var(--accent); }
+.submit-status.error   { color: #e87b7b; }
+
 /* Preview-side inline badges — a single line of selected interests
    pinned to the bottom of #preview-frame (inside the tinted background),
    so it reads as "avatar + tags" on one card. */
@@ -347,6 +437,21 @@ html, body {
   font-size: 0.85rem;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+}
+
+/* Heart-rate readout sits below the slider. Goes muted-grey when there's
+   no sensor signal (so demos without hardware look the same as before),
+   and accent-colored + slightly larger when a BPM is being received. */
+.hr-readout {
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+.hr-readout.active {
+  color: var(--accent);
+  font-weight: 500;
 }
 
 /* quote input */

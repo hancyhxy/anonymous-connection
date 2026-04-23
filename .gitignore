@@ -17,3 +17,10 @@ node_modules/
 # Python bytecode (scripts/ is Python)
 __pycache__/
 *.pyc
+
+# Python virtualenvs (server.py runs out of version2/web/.venv)
+.venv/
+venv/
+
+# Stage 2 collected user submissions — local-only, regenerated per demo
+version2/web/users.json

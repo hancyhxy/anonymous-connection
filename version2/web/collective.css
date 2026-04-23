@@ -1,0 +1,330 @@
+/* =============================================================
+   collective.css — Stage 2 wall
+   Renders N avatar tiles on a dark canvas, positioned by the
+   force-directed similarity layout in collective.js. Each tile
+   is a tinted square containing a small ASCII sprite + (optional)
+   quote bubble. Interest tags are intentionally NOT shown.
+   ============================================================= */
+
+:root {
+  --bg-page: #1a1a1e;
+  /* Tile size driven from JS LAYOUT.tileSize via the debug panel.
+     Everything inside .avatar-tile sizes off this var, so tweaking
+     one number on the panel resizes the whole grid + interior. */
+  --tile-size: 110px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: var(--bg-page);
+  color: #e8e8ec;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+               Roboto, sans-serif;
+  overflow: hidden;          /* avatars are absolutely positioned */
+}
+
+#stage {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+}
+
+/* ──────────────────────────────────────────────
+   AVATAR TILE — one per submitted profile.
+   transform-origin centered so sway rotates around middle.
+   transition smooths force-layout updates AND new arrivals
+   gliding in from the canvas center.
+   ────────────────────────────────────────────── */
+/* Strict 1:1 square — mirrors stage 1's #preview-frame so every interior
+   element (quote, sprite, tag row) lands at the same proportional spot
+   as on the phone preview. Tile gets bigger overall instead of taller. */
+.avatar-tile {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--tile-size);
+  height: var(--tile-size);
+  border-radius: 8px;
+  border: 1px solid var(--darker-color, #555);
+  background: var(--bg-color-soft, #222);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.8s cubic-bezier(0.22, 1, 0.36, 1),
+              width 0.2s, height 0.2s;
+  will-change: transform;
+}
+
+/* Small ASCII sprite — sized off --tile-size so adjusting tile rescales
+   the sprite proportionally. The 0.055 factor was tuned to match what
+   font-size: 9px looked like at tile-size: 160px. */
+.avatar-tile pre {
+  margin: 0;
+  padding: 0;
+  font-family: "Lucida Console", Monaco, "Courier New", monospace;
+  font-size: calc(var(--tile-size) * 0.06);
+  font-weight: bold;
+  line-height: 0.55em;
+  letter-spacing: -0.1em;
+  color: var(--person-color, #c9c1af);
+  white-space: pre;
+  user-select: none;
+  padding-bottom: 0;
+}
+
+/* Quote bubble — sits in the upper third just above the sprite head,
+   mirroring the phone preview's .quote-bubble (top: 12%).
+   IMPORTANT: no overflow:hidden — the .quote-tail child uses top:100%
+   to hang BELOW the bubble box, and gets clipped if we hide overflow. */
+.avatar-tile .quote-bubble {
+  position: absolute;
+  top: 12%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  padding: calc(var(--tile-size) * 0.02) calc(var(--tile-size) * 0.04);
+  background: var(--bg-color-soft, #fff);
+  border: 1px solid var(--person-color, #555);
+  border-radius: 4px;
+  color: var(--person-color, #555);
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: calc(var(--tile-size) * 0.06);
+  font-weight: 500;
+  text-align: center;
+  max-width: 88%;
+  pointer-events: none;
+  z-index: 2;
+}
+.avatar-tile .quote-bubble[data-empty="1"] { display: none; }
+/* Text overflow handled on the inner span only, so the tail span is
+   never affected by ellipsis / nowrap. */
+.avatar-tile .quote-text {
+  display: inline-block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
+/* Downward tail "▼" hanging off the bubble's bottom edge — same
+   structure & positioning as stage 1's .quote-tail, just smaller. */
+.avatar-tile .quote-tail {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--person-color, #555);
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: calc(var(--tile-size) * 0.07);
+  line-height: 0.5;
+}
+
+/* Primary-interest row — pinned to the tile bottom, mirrors the
+   web preview's #preview-interests visual language (icon+label
+   pairs with mid-dot separators). Hidden when no primaries picked.
+   Position uses % so it scales with tile size (preview uses 40px/420 ≈ 9%). */
+.avatar-tile .tile-interests {
+  position: absolute;
+  bottom: 6%;
+  left: calc(var(--tile-size) * 0.04);
+  right: calc(var(--tile-size) * 0.04);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1px calc(var(--tile-size) * 0.03);
+  font-size: calc(var(--tile-size) * 0.06);
+  font-weight: 500;
+  line-height: 1.1;
+  color: var(--darker-color, #4a3a2a);
+  pointer-events: none;
+  z-index: 2;
+}
+.avatar-tile .tile-interests[data-empty="1"] { display: none; }
+.avatar-tile .tile-interest {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+.avatar-tile .tile-interest-icon {
+  font-size: calc(var(--tile-size) * 0.065);
+  line-height: 1;
+  opacity: 0.9;
+  font-variant-emoji: text;
+}
+.avatar-tile .tile-interest-sep {
+  opacity: 0.4;
+  user-select: none;
+}
+
+/* ──────────────────────────────────────────────
+   Debug panel (right side) — live layout tuner.
+   Collapse via header button when presenting.
+   ────────────────────────────────────────────── */
+#debug-panel {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 260px;
+  background: rgba(20, 20, 24, 0.92);
+  color: #e8e8ec;
+  border: 1px solid #3a3a42;
+  border-radius: 8px;
+  font-size: 0.78rem;
+  z-index: 20;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  user-select: none;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+#debug-panel .debug-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid #2a2a32;
+  cursor: pointer;
+}
+#debug-panel .debug-title {
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #888892;
+}
+#debug-panel #debug-toggle {
+  background: transparent;
+  border: 0;
+  color: #888892;
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 0 4px;
+}
+#debug-panel.collapsed .debug-body { display: none; }
+#debug-panel.collapsed #debug-toggle { transform: rotate(-90deg); }
+#debug-panel .debug-body {
+  padding: 10px 12px 12px;
+}
+.debug-row {
+  display: grid;
+  grid-template-columns: 90px 1fr 36px;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0 2px;
+}
+.debug-label {
+  font-size: 0.72rem;
+  color: #b0b0b8;
+}
+.debug-value {
+  font-variant-numeric: tabular-nums;
+  font-size: 0.72rem;
+  color: #e8e8ec;
+  text-align: right;
+}
+.debug-row input[type="range"] {
+  width: 100%;
+  accent-color: #7ec8e3;
+}
+.debug-hint {
+  font-size: 0.65rem;
+  color: #666670;
+  line-height: 1.4;
+  margin: 0 0 8px;
+  padding-left: 2px;
+}
+.debug-hint code {
+  color: #b0b0b8;
+  background: rgba(255,255,255,0.04);
+  padding: 0 4px;
+  border-radius: 3px;
+  font-size: 0.62rem;
+}
+.debug-reset, .debug-clear {
+  margin-top: 6px;
+  width: 100%;
+  padding: 6px;
+  background: transparent;
+  border: 1px solid #3a3a42;
+  border-radius: 4px;
+  color: #888892;
+  font-size: 0.7rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+.debug-reset:hover {
+  border-color: #7ec8e3;
+  color: #7ec8e3;
+}
+/* Danger variant — wipes server-side data, not just local UI state.
+   Bordered red so it visually signals "irreversible" vs the neutral
+   reset-to-defaults button below it. */
+.debug-clear {
+  border-color: #6a3535;
+  color: #c87878;
+}
+.debug-clear:hover {
+  border-color: #e87b7b;
+  color: #e87b7b;
+  background: rgba(232, 123, 123, 0.08);
+}
+
+/* ──────────────────────────────────────────────
+   Scan-to-join QR card (bottom-left).
+   Visible at all times so latecomers can join mid-session, but
+   the opacity drops once anyone's submitted (.qr-card.dim) so it
+   stops competing with the avatars on a busy wall.
+   ────────────────────────────────────────────── */
+.qr-card {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  background: #fff;
+  border-radius: 8px;
+  padding: 10px 10px 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 15;
+  text-align: center;
+  transition: opacity 0.6s ease;
+}
+.qr-card.dim {
+  opacity: 0.35;
+}
+.qr-card.dim:hover {
+  opacity: 1;
+}
+.qr-img {
+  display: block;
+  width: 130px;
+  height: 130px;
+  image-rendering: pixelated;   /* QR pixels stay sharp */
+}
+.qr-caption {
+  font-size: 0.7rem;
+  color: #555;
+  margin-top: 4px;
+  font-family: "SF Mono", Menlo, monospace;
+  letter-spacing: 0.06em;
+}
+
+/* Status pill — bottom-right counter, low contrast so it doesn't
+   compete with the avatars. */
+.status-pill {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  padding: 6px 12px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: #888892;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  z-index: 10;
+}

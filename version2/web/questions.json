@@ -59,20 +59,20 @@
     "prompt": "Pick up to 3 interests",
     "field": "interests",
     "maxSelect": 3,
-    "note": "Multi-select tag picker. state.interests is an array of tag values. Icons are Unicode symbols chosen to work in both the browser font and Unifont on the device side (when firmware eventually renders them). Web-only for now — not in the device sync payload.",
+    "note": "Multi-select tag picker. state.interests is an array of primary tag values. Subtags (collected separately into state.interest_details) drive the collective-view similarity layout but are NOT shown on phone preview, hardware LCD, or collective view — render paths stay primary-only by design.",
     "options": [
-      { "value": "music",  "label": "music",  "icon": "♪" },
-      { "value": "film",   "label": "film",   "icon": "▶" },
-      { "value": "sport",  "label": "sport",  "icon": "◎" },
-      { "value": "art",    "label": "art",    "icon": "◈" },
-      { "value": "tech",   "label": "tech",   "icon": "※" },
-      { "value": "food",   "label": "food",   "icon": "◆" },
-      { "value": "gaming", "label": "gaming", "icon": "♠" },
-      { "value": "travel", "label": "travel", "icon": "✈︎" },
-      { "value": "books",  "label": "books",  "icon": "❏" },
-      { "value": "photo",  "label": "photo",  "icon": "◉" },
-      { "value": "dance",  "label": "dance",  "icon": "♬" },
-      { "value": "pets",   "label": "pets",   "icon": "♥" }
+      { "value": "music",  "label": "music",  "icon": "♪",  "subtags": ["jazz", "classical", "pop", "electronic", "rock", "hip-hop", "lo-fi", "indie"] },
+      { "value": "film",   "label": "film",   "icon": "▶",  "subtags": ["sci-fi", "drama", "comedy", "documentary", "horror", "animation", "art-house", "action"] },
+      { "value": "sport",  "label": "sport",  "icon": "◎",  "subtags": ["running", "yoga", "cycling", "swimming", "climbing", "team-sport", "martial-arts", "skating"] },
+      { "value": "art",    "label": "art",    "icon": "◈",  "subtags": ["painting", "sculpture", "digital", "illustration", "street-art", "ceramics", "design", "collage"] },
+      { "value": "tech",   "label": "tech",   "icon": "※",  "subtags": ["coding", "ai", "hardware", "gaming-tech", "web", "robotics", "data", "open-source"] },
+      { "value": "food",   "label": "food",   "icon": "◆",  "subtags": ["cooking", "baking", "asian", "italian", "vegan", "street-food", "coffee", "desserts"] },
+      { "value": "gaming", "label": "gaming", "icon": "♠",  "subtags": ["rpg", "fps", "indie-games", "puzzle", "strategy", "co-op", "retro", "mobile"] },
+      { "value": "travel", "label": "travel", "icon": "✈︎", "subtags": ["solo", "city", "nature", "road-trip", "backpacking", "food-tour", "festival", "remote"] },
+      { "value": "books",  "label": "books",  "icon": "❏",  "subtags": ["fiction", "nonfiction", "poetry", "sci-fi", "mystery", "philosophy", "manga", "essays"] },
+      { "value": "photo",  "label": "photo",  "icon": "◉",  "subtags": ["portrait", "street", "landscape", "film-photo", "macro", "night", "phone", "documentary"] },
+      { "value": "dance",  "label": "dance",  "icon": "♬",  "subtags": ["ballet", "hip-hop", "contemporary", "salsa", "swing", "k-pop", "club", "freestyle"] },
+      { "value": "pets",   "label": "pets",   "icon": "♥",  "subtags": ["dogs", "cats", "birds", "fish", "reptiles", "rabbits", "exotic", "farm-animals"] }
     ]
   },
   "Q_QUOTE": {
