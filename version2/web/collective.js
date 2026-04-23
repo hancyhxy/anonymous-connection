@@ -285,6 +285,26 @@ function settle(iters = TOTAL_ITERS) {
   for (let i = 0; i < iters; i++) step();
 }
 
+// Centroid correction — translates the whole swarm so its centroid lands
+// at the canvas center. Force-directed layouts settle to *some* stable
+// state but it's rarely the centered one (random init + nonlinear forces).
+// Decoupling "where each tile is relative to the others" (force solves
+// that) from "where the group sits on the canvas" (we solve here) means
+// the user can crank rest-base / score-weight to extremes and still see
+// a balanced composition.
+function recenterCluster() {
+  if (nodes.length === 0) return;
+  const w = STAGE.clientWidth, h = STAGE.clientHeight;
+  let sx = 0, sy = 0;
+  for (const n of nodes) { sx += n.x; sy += n.y; }
+  const dx = w / 2 - sx / nodes.length;
+  const dy = h / 2 - sy / nodes.length;
+  for (const n of nodes) {
+    n.x = Math.max(STAGE_PAD, Math.min(w - STAGE_PAD, n.x + dx));
+    n.y = Math.max(STAGE_PAD, Math.min(h - STAGE_PAD, n.y + dy));
+  }
+}
+
 function applyPositions() {
   for (let i = 0; i < users.length; i++) {
     const el = document.getElementById(`tile-${users[i].id}`);
@@ -313,6 +333,7 @@ function relayout() {
   ensureNodes();
   paintAll();
   settle();
+  recenterCluster();
   applyPositions();
   COUNT_EL.textContent = String(users.length);
 }

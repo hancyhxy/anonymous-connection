@@ -11,6 +11,11 @@ The whole point is that your avatar is "who you are **today**," not a
 fixed profile. Come back tomorrow, pick different answers, get a
 different avatar.
 
+![Collective wall: 25 avatars arranged so visually similar interests cluster together](version2/design/collective-wall.png)
+
+> *Stage 2's collective wall — every submitted avatar lives in the same room,
+> and shared interests pull them physically closer.*
+
 ## Try it
 
 → **[Live page](https://hancyhxy.github.io/anonymous-connection/)** —

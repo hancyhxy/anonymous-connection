@@ -406,3 +406,35 @@ html, body {
   pointer-events: none;
   z-index: 10;
 }
+
+/* Mood color legend — sits to the LEFT of the status-pill. Same low-
+   contrast pill style so it reads as ambient metadata, not a
+   competing element. Swatches use each mood's "steady" palette
+   tint (level 3) as a recognizable representative. */
+.mood-legend {
+  position: fixed;
+  bottom: 16px;
+  right: 116px;          /* clears the status-pill (which is ~88 px wide + 16 right) */
+  display: flex;
+  gap: 10px;
+  padding: 6px 12px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  color: #888892;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  z-index: 10;
+}
+.mood-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.mood-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}

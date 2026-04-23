@@ -28,6 +28,16 @@
     <span id="count">0</span> profiles
   </div>
 
+  <!-- Mood color legend — sits next to the profile counter so viewers
+       can map a tile's tint back to the mood the user picked. -->
+  <div id="mood-legend" class="mood-legend" aria-label="Mood color legend">
+    <span class="mood-chip"><span class="mood-swatch" style="background:#8aa84a"></span>chill</span>
+    <span class="mood-chip"><span class="mood-swatch" style="background:#42a8d8"></span>curious</span>
+    <span class="mood-chip"><span class="mood-swatch" style="background:#e870c0"></span>playful</span>
+    <span class="mood-chip"><span class="mood-swatch" style="background:#9a968d"></span>tired</span>
+    <span class="mood-chip"><span class="mood-swatch" style="background:#ecb548"></span>glowing</span>
+  </div>
+
   <!-- Live layout tuner. Panel.collapsed via header button. State persists
        in localStorage so it stays the way you left it across reloads. -->
   <aside id="debug-panel" aria-label="Layout debug panel">
