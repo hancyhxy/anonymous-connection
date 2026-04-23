@@ -11,12 +11,16 @@
     <!-- avatar tiles inserted by collective.js, absolutely positioned. -->
   </main>
 
-  <!-- Scan-to-join card. Bottom-left corner. Stays visible at all times
-       so latecomers can still join mid-session; opacity reduces once
-       avatars start populating so it doesn't fight for attention. -->
-  <div id="qr-card" class="qr-card">
-    <img src="/api/qr" alt="Scan to join" class="qr-img">
-    <div class="qr-caption">scan to join</div>
+  <!-- Scan-to-join overlay. Hidden by default. Toggled from the panel
+       so the host controls when newcomers can join (and so the wall
+       isn't cluttered while the avatars are the focus).
+       Click outside the card OR press ESC OR press the × to dismiss. -->
+  <div id="qr-overlay" class="qr-overlay" hidden>
+    <div class="qr-card-large">
+      <button type="button" id="qr-close" class="qr-close" aria-label="close">×</button>
+      <img src="/api/qr" alt="Scan to join" class="qr-img-large">
+      <div class="qr-caption-large">scan to join</div>
+    </div>
   </div>
 
   <!-- bottom-corner counter; hidden if you'd rather a pure visual -->
@@ -60,6 +64,14 @@
         <span class="debug-value" id="v-scoreK">0.35</span>
       </label>
       <div class="debug-hint">how strongly similarity pulls them together</div>
+
+      <label class="debug-toggle-row">
+        <span>show join QR</span>
+        <span class="toggle">
+          <input type="checkbox" id="t-showQR">
+          <span class="toggle-slider"></span>
+        </span>
+      </label>
 
       <button type="button" id="debug-clear-data" class="debug-clear">clear all profiles</button>
       <button type="button" id="debug-reset" class="debug-reset">reset to defaults</button>

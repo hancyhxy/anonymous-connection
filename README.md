@@ -24,6 +24,26 @@ python3 -m http.server 8000
 # open http://localhost:8000
 ```
 
+### Stage 2 — Collective wall (multi-phone, with backend)
+
+The collective wall is a second screen showing every avatar that's been
+submitted, arranged so similar interests cluster together. Phones scan
+a QR code printed in the terminal to join. Designed for in-person tests
+where the host laptop runs the wall and 6+ people use phones to join.
+
+```bash
+cd version2/web
+./start.sh                  # one-shot: creates .venv, installs deps, runs server
+```
+
+First run creates a Python virtualenv (~30 s, one-time). Subsequent runs
+launch instantly. The terminal prints a QR code — phones on the same
+WiFi can scan it to land on the form. On the host laptop, open
+`http://localhost:8000/collective` to see the wall.
+
+If the launcher complains about Python: `brew install python3` then
+re-run `./start.sh`.
+
 ---
 
 ## How the avatar is generated

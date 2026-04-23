@@ -315,9 +315,6 @@ function relayout() {
   settle();
   applyPositions();
   COUNT_EL.textContent = String(users.length);
-  // Dim the scan-to-join QR once anyone's submitted, so it stops
-  // grabbing focus from the avatar wall. Re-brightens on hover (CSS).
-  document.getElementById("qr-card")?.classList.toggle("dim", users.length > 0);
 }
 
 // ----- Debug panel — bind sliders to LAYOUT, relayout on input ----
@@ -336,14 +333,32 @@ function loadPanelState() {
     if (saved._collapsed) {
       document.getElementById("debug-panel")?.classList.add("collapsed");
     }
+    // Restore the QR-overlay show/hide state from the previous session.
+    // Default = hidden (panel toggle off); only flip if explicitly saved on.
+    if (saved._showQR === true) setQROverlay(true);
   } catch (_) {}
 }
 
 function savePanelState() {
   try {
     const collapsed = document.getElementById("debug-panel")?.classList.contains("collapsed");
-    localStorage.setItem(DEBUG_PANEL_KEY, JSON.stringify({ ...LAYOUT, _collapsed: !!collapsed }));
+    const showQR   = !document.getElementById("qr-overlay")?.hidden;
+    localStorage.setItem(DEBUG_PANEL_KEY, JSON.stringify({
+      ...LAYOUT,
+      _collapsed: !!collapsed,
+      _showQR:    !!showQR,
+    }));
   } catch (_) {}
+}
+
+// Show/hide the join-QR overlay AND keep the panel toggle in sync.
+// Single function so any caller (toggle handler, loadPanelState restore,
+// future keyboard shortcut) routes through one place.
+function setQROverlay(visible) {
+  const overlay = document.getElementById("qr-overlay");
+  const toggle  = document.getElementById("t-showQR");
+  if (overlay) overlay.hidden = !visible;
+  if (toggle)  toggle.checked = !!visible;
 }
 
 function refreshPanelDisplay() {
@@ -384,6 +399,38 @@ function wireDebugPanel() {
     refreshPanelDisplay();
     relayout();
     savePanelState();
+  });
+
+  // Join-QR toggle. Single source of truth: setQROverlay() writes both
+  // the overlay's hidden attr and the checkbox's checked state.
+  document.getElementById("t-showQR")?.addEventListener("change", (e) => {
+    setQROverlay(e.target.checked);
+    savePanelState();
+  });
+
+  // Three independent ways to dismiss the QR overlay, so a stuck
+  // panel state can never trap the user with the overlay open:
+  //   1. × button inside the card (top-right corner)
+  //   2. clicking the dim backdrop (anywhere outside the white card)
+  //   3. ESC key
+  const closeQR = () => { setQROverlay(false); savePanelState(); };
+  // (1) × button — explicit because it lives INSIDE the card and would
+  // otherwise be swallowed by the "click outside card" check below.
+  document.getElementById("qr-close")?.addEventListener("click", (e) => {
+    e.stopPropagation();    // don't double-fire via the overlay handler
+    closeQR();
+  });
+  // (2) backdrop click — close unless the click landed on the white card.
+  document.getElementById("qr-overlay")?.addEventListener("click", (e) => {
+    const card = document.querySelector(".qr-card-large");
+    if (card && card.contains(e.target)) return;
+    closeQR();
+  });
+  // (3) ESC.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const overlay = document.getElementById("qr-overlay");
+    if (overlay && !overlay.hidden) closeQR();
   });
 
   // Server-side wipe. POST /admin/clear is localhost-only on the backend,
@@ -464,8 +511,6 @@ function startEventStream() {
     nodes = [];
     STAGE.innerHTML = "";
     COUNT_EL.textContent = "0";
-    // Restore QR full opacity — fresh round, latecomers welcome.
-    document.getElementById("qr-card")?.classList.remove("dim");
   });
   es.onerror = () => {
     // browser auto-retries; nothing to do

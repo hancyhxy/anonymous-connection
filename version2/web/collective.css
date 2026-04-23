@@ -245,6 +245,53 @@ html, body {
   border-radius: 3px;
   font-size: 0.62rem;
 }
+/* iOS-style toggle for the join-QR switch in the panel. */
+.debug-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 14px 0 10px;
+  font-size: 0.78rem;
+  color: #b0b0b8;
+  cursor: pointer;
+}
+.toggle {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+.toggle input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.toggle-slider {
+  position: absolute;
+  inset: 0;
+  background: #3a3a42;
+  border-radius: 999px;
+  transition: background 0.15s;
+}
+.toggle-slider::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: #888892;
+  border-radius: 50%;
+  transition: transform 0.15s, background 0.15s;
+}
+.toggle input:checked + .toggle-slider {
+  background: rgba(126, 200, 227, 0.35);
+}
+.toggle input:checked + .toggle-slider::before {
+  transform: translateX(16px);
+  background: #7ec8e3;
+}
+
 .debug-reset, .debug-clear {
   margin-top: 6px;
   width: 100%;
@@ -275,41 +322,72 @@ html, body {
 }
 
 /* ──────────────────────────────────────────────
-   Scan-to-join QR card (bottom-left).
-   Visible at all times so latecomers can join mid-session, but
-   the opacity drops once anyone's submitted (.qr-card.dim) so it
-   stops competing with the avatars on a busy wall.
+   Scan-to-join overlay — toggled from the debug panel.
+   Center-anchored, large QR so it's readable from across a room.
+   Backdrop dims the wall slightly to draw eyes to the QR.
    ────────────────────────────────────────────── */
-.qr-card {
+.qr-overlay {
   position: fixed;
-  bottom: 16px;
-  left: 16px;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  /* Leave room for the right-side panel so its toggle / sliders stay
+     clickable while the overlay is up. 308 = 16 (panel-right) +
+     260 (panel-width) + 32 (gap). Without this, the overlay's z-index
+     would eat all clicks on the panel and the user couldn't toggle off. */
+  right: 308px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(20, 20, 24, 0.55);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  z-index: 25;
+}
+.qr-overlay[hidden] { display: none; }
+.qr-card-large {
+  position: relative;       /* anchor for .qr-close (top-right of card) */
   background: #fff;
-  border-radius: 8px;
-  padding: 10px 10px 6px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  z-index: 15;
+  border-radius: 12px;
+  padding: 24px 24px 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
   text-align: center;
-  transition: opacity 0.6s ease;
 }
-.qr-card.dim {
-  opacity: 0.35;
+.qr-close {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #888;
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 0 2px;
 }
-.qr-card.dim:hover {
-  opacity: 1;
+.qr-close:hover {
+  background: #f3f3f3;
+  color: #e87b7b;
 }
-.qr-img {
+.qr-img-large {
   display: block;
-  width: 130px;
-  height: 130px;
-  image-rendering: pixelated;   /* QR pixels stay sharp */
+  width: 360px;
+  height: 360px;
+  image-rendering: pixelated;
 }
-.qr-caption {
-  font-size: 0.7rem;
-  color: #555;
-  margin-top: 4px;
+.qr-caption-large {
+  font-size: 1rem;
+  color: #444;
+  margin-top: 12px;
   font-family: "SF Mono", Menlo, monospace;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
 }
 
 /* Status pill — bottom-right counter, low contrast so it doesn't
