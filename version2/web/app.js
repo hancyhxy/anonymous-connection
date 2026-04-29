@@ -551,7 +551,26 @@ function clearSessionState() {
 // double submits; sessionStorage is wiped so a refresh after submit
 // doesn't reload the same profile.
 // -------------------------------------------------------------
+// In the next-gen deployment each station's LCD shows its own QR code
+// pointing at /?sticker=N. Scanning bypasses the manual "which sticker"
+// dropdown — sticker identity is implicit in the URL the user landed on.
+// If the URL has ?sticker=N, write it into the select and hide the whole
+// question block; otherwise leave the dropdown visible (today's flow).
+function applyUrlSticker() {
+  const params = new URLSearchParams(window.location.search);
+  const raw = params.get("sticker");
+  if (!raw) return;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 5) return;
+  const select = document.getElementById("input-sticker");
+  const block  = document.querySelector('[data-q="Q_STICKER"]');
+  if (!select || !block) return;
+  select.value = String(n);
+  block.style.display = "none";
+}
+
 function wireSubmit() {
+  applyUrlSticker();
   const btn = document.getElementById("btn-submit");
   const status = document.getElementById("submit-status");
   if (!btn || !status) return;
@@ -594,7 +613,11 @@ function wireSubmit() {
       status.className = "submit-status success";
       status.textContent = "submitted ✓ check the wall";
       clearSessionState();
-      // Leave button disabled — they shouldn't submit twice this session.
+      // Re-enable the button so users can adjust + re-submit. Repeated
+      // submissions append to the collective wall (and overwrite the
+      // STAGE3_USERS slot if a sticker was selected) — that's acceptable
+      // for the demo and necessary for iterative testing.
+      btn.disabled = false;
     } catch (err) {
       console.error(err);
       btn.disabled = false;
