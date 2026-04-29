@@ -871,7 +871,7 @@ void drawMatchHint(uint16_t fg) {
     size_t cells = countCells(lines[li].c_str());
     int16_t line_w = (int16_t)(cells * GLYPH_W);
     int16_t x = (240 - line_w) / 2;
-    drawString(x, y + li * LINE_H, lines[li].c_str(), fg, matchBg565);
+    drawString(x, y + li * LINE_H, lines[li].c_str(), fg, matchBg565, /*bold=*/true);
     // Drain between lines so a long hint (4+ wrapped lines × ~10 ms each)
     // doesn't keep the RX FIFO blocked long enough to merge two host frames.
     drainSerialIntoBuf();
@@ -899,11 +899,13 @@ void tickMatchAnimation() {
 
     case MATCH_NUMBER_ROLLING: {
       // Eased step: faster at start, slower as we approach matchTarget.
-      // Step interval = 20ms + (matchCurrent / matchTarget) * 200ms,
-      // so e.g. at 90% of target each step is ~200 ms (老虎机 stop感).
+      // Step interval = 10ms + (matchCurrent / matchTarget) * 100ms,
+      // so e.g. at 90% of target each step is ~100 ms (老虎机 stop感).
+      // Halved from the original 20+200 curve — original total felt ~2× too
+      // long for the demo's pacing; same easing shape, just compressed.
       int target = matchTarget;
       uint32_t progress_pct = (matchCurrent * 100) / max(target, 1);
-      uint32_t step_ms = 20 + (progress_pct * 200) / 100;
+      uint32_t step_ms = 10 + (progress_pct * 100) / 100;
       if (now - matchLastTickMs >= step_ms) {
         matchLastTickMs = now;
         matchCurrent++;
