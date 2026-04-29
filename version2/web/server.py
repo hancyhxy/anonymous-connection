@@ -101,6 +101,7 @@ STAGE3_USERS = {
         "avatar":    {"sex": "female", "color": 2, "num": 1, "smile": True,
                       "mood": 1, "bg_level": 4},
         "interests": ["music", "film", "art"],
+        "interest_details": {"music": ["indie"], "film": ["sci-fi"], "art": ["painting"]},
         "quote":     "open to chat",
     },
     "65:BC:56:A7": {
@@ -109,6 +110,7 @@ STAGE3_USERS = {
         "avatar":    {"sex": "male", "color": 1, "num": 0, "smile": False,
                       "mood": 1, "bg_level": 3},
         "interests": ["music", "film", "tech"],
+        "interest_details": {"music": ["indie"], "film": ["sci-fi"], "tech": ["gaming-tech"]},
         "quote":     "say hi",
     },
     "65:D5:7F:A7": {
@@ -117,6 +119,7 @@ STAGE3_USERS = {
         "avatar":    {"sex": "female", "color": 0, "num": 2, "smile": False,
                       "mood": 0, "bg_level": 2},
         "interests": ["film", "books", "photo"],
+        "interest_details": {"film": ["docu"], "books": ["fiction"], "photo": ["portrait"]},
         "quote":     "daydreaming",
     },
     "65:E9:22:A7": {
@@ -125,6 +128,7 @@ STAGE3_USERS = {
         "avatar":    {"sex": "male", "color": 3, "num": 1, "smile": True,
                       "mood": 2, "bg_level": 5},
         "interests": ["sport", "food", "gaming"],
+        "interest_details": {"sport": ["cycling"], "food": ["coffee"], "gaming": ["console"]},
         "quote":     "need coffee",
     },
     "75:2A:E7:A7": {
@@ -133,6 +137,7 @@ STAGE3_USERS = {
         "avatar":    {"sex": "female", "color": 4, "num": 0, "smile": True,
                       "mood": 4, "bg_level": 5},
         "interests": ["music", "art", "dance"],
+        "interest_details": {"music": ["pop"], "art": ["painting"], "dance": ["contemporary"]},
         "quote":     "same vibe?",
     },
 }
@@ -189,6 +194,26 @@ def compute_match(me_uid: str, peer_uid: str) -> dict | None:
     score  = round(len(common) * 33) if common else 0
     if score == 99: score = 100      # cosmetic: 3/3 reads as 100%, not 99%
     hint = INTEREST_HINTS[common[0]] if common else FALLBACK_HINT
+
+    # Flatten common interests + common sub-tags into a single comma-list
+    # for the device's "you both like __" screen. For each shared primary,
+    # if both sides picked at least one matching sub-tag, list those sub-tags
+    # (skipping the primary name); otherwise list the bare primary. This
+    # gives e.g. ["indie", "sci-fi"] when two users overlap precisely, vs
+    # ["film"] when they share the category but not the flavor.
+    me_details   = me.get("interest_details",   {})
+    peer_details = peer.get("interest_details", {})
+    common_tags: list[str] = []
+    for primary in common:
+        sub_overlap = sorted(
+            set(me_details.get(primary, [])) &
+            set(peer_details.get(primary, []))
+        )
+        if sub_overlap:
+            common_tags.extend(sub_overlap)
+        else:
+            common_tags.append(primary)
+
     return {
         "ts":           datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "me_uid":       me_uid,
@@ -197,6 +222,7 @@ def compute_match(me_uid: str, peer_uid: str) -> dict | None:
         "peer_user_id": peer["user_id"],
         "score":        score,
         "common":       common,
+        "common_tags":  common_tags,
         "hint":         hint,
         "peer_avatar":  peer["avatar"],
         "peer_quote":   peer["quote"],
@@ -264,8 +290,9 @@ def submit():
                 "mood":      profile.get("mood", 0),
                 "bg_level":  profile.get("bg_level", 2),
             },
-            "interests": profile.get("interests", []),
-            "quote":     profile.get("quote", ""),
+            "interests":        profile.get("interests", []),
+            "interest_details": profile.get("interest_details", {}),
+            "quote":            profile.get("quote", ""),
         }
 
     entry = {
@@ -273,12 +300,34 @@ def submit():
         "ts":      datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "profile": profile,
     }
+    # If this submission claims a sticker, treat sticker number as a stable
+    # identity key: any prior users.json entries that selected the same
+    # sticker get removed (and their tiles dropped from the wall via the
+    # `remove` SSE event). Submissions without a sticker keep the original
+    # append-only anonymous-wall behavior.
+    removed_ids: list[str] = []
     with _lock:
         users = load_users()
+        if sticker_num is not None:
+            keep = []
+            for u in users:
+                if u.get("profile", {}).get("sticker") == int(sticker_num):
+                    removed_ids.append(u["id"])
+                else:
+                    keep.append(u)
+            users = keep
+        # Persist the sticker number on the entry so we can match against
+        # it on the next submission. (We popped it from `profile` earlier
+        # for STAGE3_USERS overlay; put it back on the saved profile so
+        # users.json carries the routing hint forward across restarts.)
+        if sticker_num is not None:
+            entry["profile"]["sticker"] = int(sticker_num)
         users.append(entry)
         save_users(users)
+    for rid in removed_ids:
+        broadcast("remove", {"id": rid})
     broadcast("user", entry)
-    return jsonify({"ok": True, "id": entry["id"]})
+    return jsonify({"ok": True, "id": entry["id"], "removed": removed_ids})
 
 @app.route("/events")
 def events():

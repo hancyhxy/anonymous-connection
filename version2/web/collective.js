@@ -533,6 +533,25 @@ function startEventStream() {
     STAGE.innerHTML = "";
     COUNT_EL.textContent = "0";
   });
+  // A `remove` event fires when /submit dedups on sticker number — the
+  // server has already removed the prior entry from users.json and is
+  // telling us to drop its tile. Payload: {id}. We splice both arrays
+  // and remove the DOM tile; the new entry arrives in a follow-up
+  // `user` event and gets laid out normally via relayout().
+  es.addEventListener("remove", (e) => {
+    try {
+      const { id } = JSON.parse(e.data);
+      const idx = users.findIndex(u => u.id === id);
+      if (idx === -1) return;
+      users.splice(idx, 1);
+      nodes.splice(idx, 1);
+      const el = document.getElementById(`tile-${id}`);
+      if (el) el.remove();
+      COUNT_EL.textContent = String(users.length);
+    } catch (err) {
+      console.warn("[collective] bad remove event:", err);
+    }
+  });
   es.onerror = () => {
     // browser auto-retries; nothing to do
   };
