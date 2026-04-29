@@ -202,10 +202,20 @@
           // (drain-protected) path and gives the demo a continuous visual:
           // me avatar → match anim → back to me avatar.
           //
-          // interests intentionally [] — the icon-mapping experiment introduced
-          // a race we couldn't pin down (animation triggered intermittently),
-          // and the demo doesn't need device-side tags to read clearly. Keep
-          // this off; revisit after the demo with proper instrumentation.
+          // Interests: server gives us a flat string array (e.g. ["music",
+          // "film", "art"]); firmware expects [{icon, label}] objects (see
+          // handleLine in serial_avatar.ino — it iterates JsonObjects and
+          // reads tag["icon"] / tag["label"]). Map flat → object shape here.
+          // icon left empty for now (no glyph mapping yet); firmware accepts
+          // empty icon as long as label has content.
+          //
+          // The earlier "race" that made us turn this off (commit history)
+          // was almost certainly schema mismatch: passing flat strings into
+          // the {icon,label} loop gave interest_count=0 silently. Now that
+          // the shape is correct, this should be safe.
+          //
+          // Packet size estimate: ~186 B (was 106 B). Comfortably under
+          // 2 KB RX FIFO, 1 KB lineBuf ceiling, 1 KB StaticJsonDocument cap.
           sendState({
             sex:    u.avatar.sex,
             color:  u.avatar.color,
@@ -214,7 +224,7 @@
             mood:   u.avatar.mood,
             energy: u.avatar.bg_level,    // wire field rename, mirrors app.js
             quote:  u.quote,
-            interests: [],
+            interests: u.interests.map(label => ({ icon: "", label })),
           });
         });
         host.appendChild(lbl);
