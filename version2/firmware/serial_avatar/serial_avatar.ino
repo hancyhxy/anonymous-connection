@@ -224,7 +224,10 @@ bool outerDirty = true;
 enum MatchAnimState {
   MATCH_IDLE,
   MATCH_NUMBER_ROLLING,    // big number ticking up toward `target`
-  MATCH_NUMBER_STATIC,     // landed on target, holding for ~3 s
+  MATCH_NUMBER_STATIC,     // landed on target, holding briefly
+  MATCH_COMMON_FADING_IN,  // "you both like / you are so different" caption + tags fading in
+  MATCH_COMMON_STATIC,     // common-tags screen visible
+  MATCH_COMMON_FADING_OUT, // fade out before number resumes
   MATCH_NUMBER_FADING,     // fade number out toward bg
   MATCH_HINT_FADING_IN,    // wrapped hint text fading in
   MATCH_HINT_STATIC,       // hint visible for ~3 s
@@ -235,6 +238,9 @@ int      matchTarget = 0;         // final score 0..100
 int      matchCurrent = 0;        // currently displayed number
 uint32_t matchLastTickMs = 0;     // last time we incremented matchCurrent
 String   matchHint;               // server-supplied hint string (UTF-8)
+String   matchCommonTags;         // pre-formatted comma-joined tags for COMMON phase
+                                  // (server flattens common × interest_details into one
+                                  // list; firmware only renders, no parsing needed)
 uint16_t matchBg565 = 0;          // captured bg color for the entire animation
 uint16_t matchFg565 = 0;          // captured fg color (matches mainCol)
 bool     matchClearPending = false;  // set by handleMatch, consumed by tickMatchAnimation
@@ -480,9 +486,16 @@ void renderWaiting() {
   // ~256 B USB-CDC RX FIFO and silently loses the '\n' that closes the JSON.
   gfx->fillScreen(RGB565_BLACK);
   drainSerialIntoBuf();
-  drawString(30, 96,  "waiting for",    RGB565_WHITE, RGB565_BLACK);
+  // Mid-gray (~RGB 64,64,64) instead of white. The waiting screen is what
+  // the LCD shows on every boot (sometimes for tens of seconds) before an
+  // avatar packet arrives, and pure white on black at that exposure pattern
+  // produces visible image persistence (faint "waiting for connection"
+  // ghost lingering across all later screens). Lower contrast → no burn-in
+  // training; still readable for the brief moment it's actually shown.
+  const uint16_t WAITING_FG = 0x4208;
+  drawString(30, 96,  "waiting for",    WAITING_FG, RGB565_BLACK);
   drainSerialIntoBuf();
-  drawString(30, 120, "web connect...", RGB565_WHITE, RGB565_BLACK);
+  drawString(30, 120, "web connect...", WAITING_FG, RGB565_BLACK);
   drainSerialIntoBuf();
 }
 
@@ -770,6 +783,23 @@ void handleMatch(const JsonDocument &doc) {
   matchTarget = constrain(score, 0, 100);
   matchHint   = String(hint);
 
+  // Pre-format common_tags into a comma-joined string we can render in one
+  // wrapHint pass. Server already flattens (sub-tag preferred over primary).
+  // Empty array = no overlap → COMMON phase still runs but uses fallback copy
+  // ("you are so different, but...") set in drawCommonScreen.
+  matchCommonTags = "";
+  JsonArrayConst tags = doc["common_tags"].as<JsonArrayConst>();
+  if (!tags.isNull()) {
+    bool first = true;
+    for (JsonVariantConst v : tags) {
+      const char* t = v | "";
+      if (t[0] == '\0') continue;
+      if (!first) matchCommonTags += ", ";
+      matchCommonTags += t;
+      first = false;
+    }
+  }
+
   // Score=0 (no overlap): skip the rolling animation — going from 1 down to
   // 0 reads as deflating. Show a brief static "0" then transition to hint.
   // For non-zero scores, start counting from 1 with an easing curve toward
@@ -878,6 +908,46 @@ void drawMatchHint(uint16_t fg) {
   }
 }
 
+// Draw the COMMON phase screen: a small caption on top and the comma-joined
+// tag list below, both wrapped + centered. If matchCommonTags is empty
+// (score=0 / no overlap), shows the "so different but..." fallback copy.
+// Same fade-via-mix565 pattern as drawMatchHint — caller picks the color.
+void drawCommonScreen(uint16_t fg) {
+  const int LINE_H    = 18;
+  const int MAX_CHARS = 30;
+  const int MAX_LINES = 4;
+  const bool hasTags  = matchCommonTags.length() > 0;
+  const char* caption = hasTags ? "you both like" : "you are so different,";
+  const char* body    = hasTags ? matchCommonTags.c_str() : "but...";
+
+  // Wrap body so long tag lists (e.g. "sci-fi, indie, painting") don't
+  // overrun screen width. Caption is always one line — pre-known short.
+  String body_lines[MAX_LINES];
+  int n_body = wrapHint(body, MAX_CHARS, body_lines, MAX_LINES);
+  if (n_body == 0) return;
+
+  // Layout: caption + 8 px gap + body lines, vertically centered as a block.
+  const int CAPTION_GAP = 8;
+  int16_t total_h = (int16_t)(LINE_H + CAPTION_GAP + n_body * LINE_H);
+  int16_t y = (240 - total_h) / 2;
+
+  size_t cap_cells = countCells(caption);
+  int16_t cap_w = (int16_t)(cap_cells * GLYPH_W);
+  int16_t cap_x = (240 - cap_w) / 2;
+  drawString(cap_x, y, caption, fg, matchBg565, /*bold=*/true);
+  drainSerialIntoBuf();
+
+  int16_t body_y = y + LINE_H + CAPTION_GAP;
+  for (int li = 0; li < n_body; li++) {
+    size_t cells  = countCells(body_lines[li].c_str());
+    int16_t line_w = (int16_t)(cells * GLYPH_W);
+    int16_t x = (240 - line_w) / 2;
+    drawString(x, body_y + li * LINE_H, body_lines[li].c_str(),
+               fg, matchBg565, /*bold=*/true);
+    drainSerialIntoBuf();
+  }
+}
+
 // Tick the match-screen state machine. Called from loop(); does its own
 // timing via millis() so it never sleeps. Each phase paints what it owns
 // and advances state when its timer expires.
@@ -922,11 +992,57 @@ void tickMatchAnimation() {
     }
 
     case MATCH_NUMBER_STATIC: {
-      // Hold for 3 s. The number is already on screen (drawn either by the
-      // ROLLING tail or by the deferred-clear branch when score=0).
-      if (now - matchPhaseStartMs >= 3000) {
-        matchState = MATCH_NUMBER_FADING;
+      // Hold for 1.5 s, then transition into the COMMON phase. Used to be
+      // 3 s before the COMMON phase existed; halved to keep total animation
+      // length tolerable now that we have an extra screen between number
+      // and hint.
+      if (now - matchPhaseStartMs >= 1500) {
+        // Clear the screen so the COMMON caption + tags paint cleanly over
+        // the same bg. Without this fillScreen, the 33% number stays behind.
+        gfx->fillScreen(matchBg565);
+        matchState = MATCH_COMMON_FADING_IN;
         matchPhaseStartMs = now;
+      }
+      break;
+    }
+
+    case MATCH_COMMON_FADING_IN: {
+      // 600 ms fade-in for the "you both like" caption + tags.
+      uint32_t elapsed = now - matchPhaseStartMs;
+      if (elapsed >= 600) {
+        drawCommonScreen(matchFg565);
+        matchState = MATCH_COMMON_STATIC;
+        matchPhaseStartMs = now;
+      } else {
+        uint8_t t = (elapsed * 255) / 600;
+        drawCommonScreen(mix565(matchFg565, matchBg565, t));
+      }
+      break;
+    }
+
+    case MATCH_COMMON_STATIC: {
+      // 2.5 s read time. Already painted in fully-saturated fg by the
+      // FADING_IN tail; nothing to do until the timer expires.
+      if (now - matchPhaseStartMs >= 2500) {
+        matchState = MATCH_COMMON_FADING_OUT;
+        matchPhaseStartMs = now;
+      }
+      break;
+    }
+
+    case MATCH_COMMON_FADING_OUT: {
+      // 600 ms fade-out, then go straight to the hint phase. We skip
+      // MATCH_NUMBER_FADING entirely — re-painting the score number after
+      // the user already moved past it (via tags) reads as a glitchy
+      // re-flash, not a meaningful echo. Tags → hint is the natural arc.
+      uint32_t elapsed = now - matchPhaseStartMs;
+      if (elapsed >= 600) {
+        gfx->fillScreen(matchBg565);
+        matchState = MATCH_HINT_FADING_IN;
+        matchPhaseStartMs = now;
+      } else {
+        uint8_t t = 255 - (elapsed * 255 / 600);
+        drawCommonScreen(mix565(matchFg565, matchBg565, t));
       }
       break;
     }
