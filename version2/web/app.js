@@ -557,18 +557,27 @@ function wireSubmit() {
   if (!btn || !status) return;
 
   // Match what the backend stores. Mirrors syncDevice() field set
-  // PLUS interest_details, which the device doesn't get.
-  const buildSubmitPayload = () => ({
-    sex:               state.sex,
-    color:             state.color,
-    num:               state.num,
-    smile:             state.smile,
-    mood:              state.mood,
-    bg_level:          state.bg_level,
-    quote:             state.quote,
-    interests:         state.interests,
-    interest_details:  state.interest_details,
-  });
+  // PLUS interest_details, which the device doesn't get. The optional
+  // sticker number tells the server to also bind this submission to a
+  // STAGE3_USERS slot so my ESP32 tap reads the DIY data; an empty value
+  // keeps the legacy "wall only" behavior.
+  const buildSubmitPayload = () => {
+    const stickerEl = document.getElementById("input-sticker");
+    const stickerVal = stickerEl ? stickerEl.value : "";
+    const payload = {
+      sex:               state.sex,
+      color:             state.color,
+      num:               state.num,
+      smile:             state.smile,
+      mood:              state.mood,
+      bg_level:          state.bg_level,
+      quote:             state.quote,
+      interests:         state.interests,
+      interest_details:  state.interest_details,
+    };
+    if (stickerVal) payload.sticker = Number(stickerVal);
+    return payload;
+  };
 
   btn.addEventListener("click", async () => {
     btn.disabled = true;

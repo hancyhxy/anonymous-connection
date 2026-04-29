@@ -23,6 +23,8 @@
 
 #include <Arduino_GFX_Library.h>
 #include <ArduinoJson.h>
+#include <Wire.h>
+#include <Adafruit_PN532.h>
 
 #include "sprites.h"
 #include "glyphs.h"
@@ -69,23 +71,38 @@ struct AvatarState {
 #define LCD_H     240
 #define ROTATION  0
 
-// ---- Heart rate sensor (3-wire analog pulse sensor) ------------------------
-// Wired:  VCC→3V3, GND→GND, S→GPIO3.
-// GPIO3 is ADC1_CH3 on ESP32-C6 — clean ADC pin (1/2 are strapping-adjacent).
-#define HR_PIN          3
-#define HR_SAMPLE_MS    20      // 50 Hz sampling
-#define HR_REPORT_MS    1000    // upstream report cadence
-#define HR_BASELINE_N   100     // ~2 s window for DC-offset estimate
-#define HR_RISE_THRESH  40      // ADC counts above baseline → peak candidate
-                                // (tuned down from 80 — 80 was too strict for
-                                // a finger pressed firmly, where pulse amplitude
-                                // can drop below 60 counts)
-#define HR_DEBUG        1       // 1 = also log raw ADC + baseline at 5 Hz so
-                                // the threshold can be tuned by eyeball
+// Heart-rate sensor support was removed 2026-04-27 — sensor was never
+// wired up, and the 5 Hz [hr] debug noise was drowning Stage 3 match
+// logging in the Web Serial console. The web side (app.js:67+) still
+// listens for {"hr":N} messages; without firmware sending them, the
+// energy slider falls back to manual mode (which is what we always used
+// anyway). Re-add HR by reverting this commit if a sensor ever comes back.
+
 #define IPS_MODE  true
 
 Arduino_DataBus *bus = new Arduino_ESP32SPI(TFT_DC, TFT_CS, TFT_SCK, TFT_MOSI, GFX_NOT_DEFINED);
 Arduino_GFX *gfx = new Arduino_ST7789(bus, TFT_RST, ROTATION, IPS_MODE, LCD_W, LCD_H, 0, 0, 0, 0);
+
+
+// ---- NFC config (PN532 over I2C, bring-up validated 2026-04-27) ------------
+// Bus is independent from the LCD SPI (pins 6/7/14/15) so they coexist without
+// arbitration. IRQ/RST aren't wired in I2C mode for this build — pass -1 and
+// the library will skip optional features that need them.
+#define NFC_I2C_SDA       1
+#define NFC_I2C_SCL       2
+// Poll timeout per loop iteration. Short enough that ANIM_INTERVAL_MS (166 ms)
+// sprite breathing keeps its cadence — at 50 ms we get up to 3 idle polls per
+// frame, never blocking long enough to skip a tick.
+#define NFC_POLL_TIMEOUT  50
+// Cool-down after a successful tap. Match animation runs ~21 s end-to-end and
+// the firmware refuses to read while matchState != MATCH_IDLE anyway, so this
+// only matters for the small window between tap and animation start. 1500 ms
+// is comfortably longer than handleMatch + first ROLLING tick (~50 ms).
+#define NFC_DEBOUNCE_MS   1500
+
+Adafruit_PN532 nfc(-1, -1, &Wire);
+uint32_t nfcLastTapMs = 0;
+bool     nfcReady     = false;
 
 
 // ---- Sprite layout ---------------------------------------------------------
@@ -156,6 +173,18 @@ uint32_t darkenHex(uint32_t hex) {
   return ((uint32_t)dr << 16) | ((uint32_t)dg << 8) | (uint32_t)db;
 }
 
+// Linearly interpolate two RGB565 colors at a given mix point (0-255).
+// Used for fade in/out — LCD has no alpha channel, so we re-paint each frame
+// with a color that's already pre-blended toward the background.
+uint16_t mix565(uint16_t fg, uint16_t bg, uint8_t t) {
+  uint8_t fr = (fg >> 11) & 0x1F, fg5 = (fg >> 5) & 0x3F, fb = fg & 0x1F;
+  uint8_t br = (bg >> 11) & 0x1F, bg5 = (bg >> 5) & 0x3F, bb = bg & 0x1F;
+  uint8_t r = ((uint16_t)fr * t + (uint16_t)br * (255 - t)) / 255;
+  uint8_t g = ((uint16_t)fg5 * t + (uint16_t)bg5 * (255 - t)) / 255;
+  uint8_t b = ((uint16_t)fb * t + (uint16_t)bb * (255 - t)) / 255;
+  return (r << 11) | (g << 5) | b;
+}
+
 uint32_t lightenHex(uint32_t hex) {
   int32_t r = (hex >> 16) & 0xFF;
   int32_t g = (hex >>  8) & 0xFF;
@@ -173,6 +202,13 @@ uint32_t lightenHex(uint32_t hex) {
 AvatarState st = { 2, 2, "male", 0, 0, false, "", {}, 0, false };
 
 String lineBuf;
+// Latest-fully-received frame captured during a render-time drain. Set by
+// drainSerialIntoBuf when it encounters '\n'; consumed by loop() once it's
+// safe (matchState==IDLE) to handleLine() outside the drain path. Stays
+// empty during normal idle operation — only used as a hand-off slot when
+// a frame arrives while the screen is busy. Newer-wins: each '\n' overwrites
+// any prior pendingLine, so only the most recent frame survives.
+String pendingLine;
 uint32_t animFrame = 0;
 uint32_t lastAnimMs = 0;
 
@@ -181,28 +217,28 @@ uint32_t lastAnimMs = 0;
 // Inner-frame ticks only redraw the sprite glyphs.
 bool outerDirty = true;
 
-// ---- Heart rate state -------------------------------------------------------
-// Simple peak-detect over the analog pulse waveform. We track a rolling
-// baseline (DC offset, drifts with finger pressure / ambient light) and
-// declare a beat each time the signal crosses (baseline + HR_RISE_THRESH)
-// from below. The last 3 beat intervals are averaged → BPM.
-//
-// Why this and not a library: the 3-wire pulse sensor outputs raw analog;
-// libraries like PulseSensor expect a specific Arduino timer ISR setup that
-// doesn't translate cleanly to ESP32-C6. A 50 Hz polled detector is good
-// enough for 40-180 BPM range.
-uint32_t hr_lastSampleMs = 0;
-uint32_t hr_lastReportMs = 0;
-int32_t  hr_baselineSum  = 0;       // running sum for baseline window
-int      hr_baselineN    = 0;
-int      hr_baseline     = 2048;    // mid-rail until we have data
-bool     hr_above        = false;   // currently above threshold?
-uint32_t hr_lastBeatMs   = 0;
-uint32_t hr_intervals[3] = {0, 0, 0};
-int      hr_intervalIdx  = 0;
-int      hr_intervalCount = 0;
-int      hr_currentBpm   = 0;
-
+// Stage 3 match-screen state machine. While in any non-IDLE state, the
+// regular sprite redraw is suspended — the screen belongs to the match
+// animation. Returns to IDLE after hint display, which re-arms outerDirty
+// to repaint the avatar.
+enum MatchAnimState {
+  MATCH_IDLE,
+  MATCH_NUMBER_ROLLING,    // big number ticking up toward `target`
+  MATCH_NUMBER_STATIC,     // landed on target, holding for ~3 s
+  MATCH_NUMBER_FADING,     // fade number out toward bg
+  MATCH_HINT_FADING_IN,    // wrapped hint text fading in
+  MATCH_HINT_STATIC,       // hint visible for ~3 s
+};
+MatchAnimState matchState = MATCH_IDLE;
+uint32_t matchPhaseStartMs = 0;   // when the current phase started
+int      matchTarget = 0;         // final score 0..100
+int      matchCurrent = 0;        // currently displayed number
+uint32_t matchLastTickMs = 0;     // last time we incremented matchCurrent
+String   matchHint;               // server-supplied hint string (UTF-8)
+uint16_t matchBg565 = 0;          // captured bg color for the entire animation
+uint16_t matchFg565 = 0;          // captured fg color (matches mainCol)
+bool     matchClearPending = false;  // set by handleMatch, consumed by tickMatchAnimation
+                                     // to defer the bg fillScreen out of the drain path
 
 // ---- Sprite lookup ---------------------------------------------------------
 // Build the key "sex_color_num[smile]" and linear-search SPRITES table.
@@ -382,6 +418,46 @@ size_t drawString2x(int16_t x, int16_t y, const char* s, size_t n_cells,
   return i;
 }
 
+// 4× scaled text: 32×32 per cell. Used by the match-score rolling animation
+// where the number must be readable from across a small classroom. Each set
+// glyph pixel becomes a 4×4 block; clear pixels are filled with bg.
+size_t drawString4x(int16_t x, int16_t y, const char* s, size_t n_cells,
+                    uint16_t fg, uint16_t bg) {
+  size_t i = 0;
+  int16_t cx = x;
+  size_t drawn = 0;
+  while (s[i] != '\0' && drawn < n_cells) {
+    size_t n = 0;
+    uint32_t cp = decodeUtf8(s + i, &n);
+    if (n == 0) break;
+    int idx = glyphIndex(cp);
+    gfx->fillRect(cx, y, 32, 32, bg);
+    if (idx >= 0) {
+      uint8_t buf[GLYPH_BYTES];
+      memcpy_P(buf, &GLYPH_BITMAPS[idx][0], GLYPH_BYTES);
+      gfx->startWrite();
+      // Non-uniform scale: horizontal 4×, vertical 2×. Glyph source is 8×16
+      // (1:2 nat ratio) → painted as 32×32 cell. Earlier version used 4×4
+      // and clipped to top 8 rows for "chunky 32 px tall" — that produced
+      // half-digits because Unifont numerals split their stroke mass across
+      // all 16 rows (top half of "6"/"8" alone reads as a tiny arc).
+      for (int r = 0; r < GLYPH_H; r++) {
+        uint8_t row_bits = buf[r];
+        for (int c = 0; c < GLYPH_W; c++) {
+          if (row_bits & (0x80 >> c)) {
+            gfx->writeFillRect(cx + c * 4, y + r * 2, 4, 2, fg);
+          }
+        }
+      }
+      gfx->endWrite();
+    }
+    cx += 32;
+    i += n;
+    drawn++;
+  }
+  return i;
+}
+
 // Count how many cells (codepoints, including ASCII) a UTF-8 string has.
 size_t countCells(const char* s) {
   size_t i = 0, cells = 0;
@@ -396,9 +472,18 @@ size_t countCells(const char* s) {
 }
 
 void renderWaiting() {
+  // Same FIFO-overflow trap renderFull() defends against: each gfx call here
+  // is synchronous SPI that blocks ~tens of ms. Without intermediate drains,
+  // a host frame arriving mid-render (e.g. animation just ended, st.valid is
+  // still false → caller falls into this branch, and the next NFC tap's match
+  // packet lands on the wire while we're filling the screen) overflows the
+  // ~256 B USB-CDC RX FIFO and silently loses the '\n' that closes the JSON.
   gfx->fillScreen(RGB565_BLACK);
+  drainSerialIntoBuf();
   drawString(30, 96,  "waiting for",    RGB565_WHITE, RGB565_BLACK);
+  drainSerialIntoBuf();
   drawString(30, 120, "web connect...", RGB565_WHITE, RGB565_BLACK);
+  drainSerialIntoBuf();
 }
 
 // Render the sprite — source is 18×18 cells of UTF-8; we render rows
@@ -537,6 +622,39 @@ void drawInterestRow(uint16_t bg_color, uint16_t fg_color) {
 }
 
 // Full redraw — used when outer state (mood/energy/sprite identity/quote) changes.
+// Pull bytes from the USB-CDC RX FIFO into lineBuf without parsing. Called
+// between SPI ops in renderFull() / inside tickMatchAnimation() so the FIFO
+// (~256 B) cannot fill up while the screen is being repainted.
+//
+// Newer-wins semantics: when '\n' is encountered, the just-completed frame
+// is moved into `pendingLine` (overwriting any earlier one). The loop()
+// will dispatch pendingLine once it's safe — i.e. after render/anim finishes
+// and we're back at the top of loop. This lets us preserve the *latest*
+// frame that arrived during the render window without invoking handleLine
+// (which is a blocking SPI op) inside the drain path.
+//
+// Mirrors the host's pendingPacket pattern — only the freshest frame seen
+// during a busy window ends up dispatched.
+void drainSerialIntoBuf() {
+  while (Serial.available() > 0) {
+    char c = (char)Serial.read();
+    if (c == '\r') continue;
+    if (c == '\n') {
+      if (lineBuf.length() > 0) {
+        pendingLine = lineBuf;   // newer-wins; overwrite any prior pending
+        lineBuf = "";
+      }
+      continue;
+    }
+    lineBuf += c;
+    if (lineBuf.length() > 1024) {
+      Serial.printf("[serial_avatar] line buffer overflow at %u bytes — dropping (mid-render)\n",
+                    lineBuf.length());
+      lineBuf = "";
+    }
+  }
+}
+
 void renderFull() {
   if (!st.valid) { renderWaiting(); return; }
 
@@ -551,6 +669,7 @@ void renderFull() {
   uint16_t mainCol565 = hexToRgb565(mainCol);
 
   gfx->fillScreen(bgSoft565);
+  drainSerialIntoBuf();
 
   const SpriteEntry* sp = findSprite(st);
   if (sp) {
@@ -566,9 +685,13 @@ void renderFull() {
              st.sex.c_str(), st.color, st.num, st.smile ? "smile" : "");
     drawString(12, 112, key, mainCol565, bgSoft565);
   }
+  drainSerialIntoBuf();
 
   drawQuoteBubble(bgSoft565, mainCol565);
+  drainSerialIntoBuf();
+
   drawInterestRow(bgSoft565, mainCol565);
+  drainSerialIntoBuf();
 }
 
 // Inner-frame redraw — only the sprite area, bubble untouched.
@@ -594,14 +717,298 @@ void renderSpriteOnly() {
 }
 
 
+// ---- Stage 3 match handler -------------------------------------------------
+// Step 1 (this commit): just acknowledge the message in serial. No drawing.
+// Step 3 will draw the match panel; Step 4 will animate it.
+//
+// Why split? Verifying the data path independently from rendering means if
+// the screen stays blank in Step 3 we already know the JSON arrived. Same
+// "verify the data layer first" lesson burned into hardware.md §4.2.
+void handleMatch(const JsonDocument &doc) {
+  int score = doc["score"] | -1;
+  const char* hint = doc["hint"] | "";
+  Serial.printf("[serial_avatar] MATCH RECEIVED  score=%d  hint=\"%s\"\n",
+                score, hint);
+
+  // Dump the peer avatar fields too so we can see if the full payload
+  // survived the web → serial transport. If any of these come back as
+  // sentinels (-1 / empty), the bridge is mangling the JSON, not us.
+  JsonObjectConst peer = doc["peer_avatar"].as<JsonObjectConst>();
+  if (!peer.isNull()) {
+    Serial.printf("[serial_avatar]   peer.sex=%s color=%d num=%d smile=%d mood=%d bg=%d\n",
+                  (const char*)(peer["sex"] | ""),
+                  (int)(peer["color"]    | -1),
+                  (int)(peer["num"]      | -1),
+                  (bool)(peer["smile"]   | false),
+                  (int)(peer["mood"]     | -1),
+                  (int)(peer["bg_level"] | -1));
+  }
+
+  // Common interests array — print as comma-joined list.
+  JsonArrayConst common = doc["common"].as<JsonArrayConst>();
+  if (!common.isNull()) {
+    Serial.print("[serial_avatar]   common=[");
+    bool first = true;
+    for (JsonVariantConst v : common) {
+      if (!first) Serial.print(",");
+      Serial.print((const char*)(v | ""));
+      first = false;
+    }
+    Serial.println("]");
+  }
+
+  // Kick off the on-screen match animation. Use the *current* avatar's
+  // bg/main palette so the match screen feels visually continuous with the
+  // sprite that was just there. Captured into matchBg565/matchFg565 so the
+  // animation doesn't need to re-derive colors each frame.
+  int m = constrain(st.mood,   0, 4);
+  int e = constrain(st.energy, 0, 5);
+  uint32_t bg      = pgm_read_dword(&PALETTE[m][e]);
+  matchBg565 = hexToRgb565(lightenHex(bg));
+  matchFg565 = hexToRgb565(darkenHex(bg));
+
+  matchTarget = constrain(score, 0, 100);
+  matchHint   = String(hint);
+
+  // Score=0 (no overlap): skip the rolling animation — going from 1 down to
+  // 0 reads as deflating. Show a brief static "0" then transition to hint.
+  // For non-zero scores, start counting from 1 with an easing curve toward
+  // matchTarget (loop() does the actual stepping).
+  //
+  // Critical: do NOT call gfx->fillScreen here. This handler runs inside the
+  // loop()'s drain path — any blocking SPI op here means lineBuf for the
+  // *next* incoming frame can't be advanced and the USB-CDC RX FIFO can
+  // overflow (which is what just bit us: a 1025 B "merged" line reappeared
+  // because fillScreen blocked while two stage3 frames arrived in quick
+  // succession). The screen clear is deferred to the first ROLLING frame
+  // (which already runs in tickMatchAnimation, outside the drain path).
+  matchClearPending = true;
+  if (matchTarget == 0) {
+    matchCurrent = 0;
+    matchState = MATCH_NUMBER_STATIC;     // skip rolling, hold "0" briefly
+    matchPhaseStartMs = millis();
+  } else {
+    matchCurrent = 1;
+    matchState = MATCH_NUMBER_ROLLING;
+    matchPhaseStartMs = millis();
+    matchLastTickMs = matchPhaseStartMs;
+  }
+}
+
+
+// ---- Match-screen rendering helpers ---------------------------------------
+
+// Center a score number (0-100) in 4× scale. Each glyph is 32 px wide,
+// so 1-digit = 32 px, 2-digit = 64 px, 3-digit = 96 px. Vertically anchored
+// at y=100 so the number sits roughly mid-screen.
+void drawMatchNumber(int n, uint16_t fg) {
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%d%%", constrain(n, 0, 100));
+  size_t cells = countCells(buf);
+  int16_t total_w = (int16_t)(cells * 32);
+  int16_t x = (240 - total_w) / 2;
+  int16_t y = 100;
+  drawString4x(x, y, buf, cells, fg, matchBg565);
+  drainSerialIntoBuf();   // keep RX FIFO clear during rapid roll updates
+}
+
+// Wrap `s` to lines of at most max_chars cells each, breaking on the last
+// space at or before the limit. Falls back to hard-cut if no space found.
+// Writes line slices to `out` (max `max_lines` entries) and returns count.
+int wrapHint(const char* s, int max_chars, String* out, int max_lines) {
+  int line_count = 0;
+  size_t total_len = strlen(s);
+  size_t i = 0;
+  while (i < total_len && line_count < max_lines) {
+    // Count cells until we exceed max_chars or hit end.
+    size_t bytes_for_max = 0;
+    size_t cells_so_far  = 0;
+    size_t last_space_byte = 0;
+    size_t last_space_cells = 0;
+    while (i + bytes_for_max < total_len && cells_so_far < (size_t)max_chars) {
+      size_t n = 0;
+      uint32_t cp = decodeUtf8(s + i + bytes_for_max, &n);
+      if (n == 0) break;
+      if (cp == ' ') {
+        last_space_byte  = bytes_for_max;
+        last_space_cells = cells_so_far;
+      }
+      bytes_for_max += n;
+      cells_so_far++;
+    }
+    size_t take_bytes;
+    size_t take_cells;
+    bool   skip_trailing_space = false;
+    if (i + bytes_for_max >= total_len) {
+      take_bytes = bytes_for_max;
+      take_cells = cells_so_far;
+    } else if (last_space_cells > 0) {
+      take_bytes = last_space_byte;
+      take_cells = last_space_cells;
+      skip_trailing_space = true;
+    } else {
+      take_bytes = bytes_for_max;
+      take_cells = cells_so_far;
+    }
+    out[line_count++] = String(s + i).substring(0, take_bytes);
+    i += take_bytes + (skip_trailing_space ? 1 : 0);
+  }
+  return line_count;
+}
+
+// Draw the wrapped hint centered vertically in a single color (fade can be
+// achieved by re-calling with a mix565 result at the call site).
+void drawMatchHint(uint16_t fg) {
+  const int LINE_H    = 18;
+  const int MAX_CHARS = 30;
+  const int MAX_LINES = 6;
+  String lines[MAX_LINES];
+  int n = wrapHint(matchHint.c_str(), MAX_CHARS, lines, MAX_LINES);
+  if (n == 0) return;
+  int16_t total_h = (int16_t)(n * LINE_H);
+  int16_t y = (240 - total_h) / 2;
+  for (int li = 0; li < n; li++) {
+    size_t cells = countCells(lines[li].c_str());
+    int16_t line_w = (int16_t)(cells * GLYPH_W);
+    int16_t x = (240 - line_w) / 2;
+    drawString(x, y + li * LINE_H, lines[li].c_str(), fg, matchBg565);
+    // Drain between lines so a long hint (4+ wrapped lines × ~10 ms each)
+    // doesn't keep the RX FIFO blocked long enough to merge two host frames.
+    drainSerialIntoBuf();
+  }
+}
+
+// Tick the match-screen state machine. Called from loop(); does its own
+// timing via millis() so it never sleeps. Each phase paints what it owns
+// and advances state when its timer expires.
+void tickMatchAnimation() {
+  if (matchState == MATCH_IDLE) return;
+
+  // Deferred clear — handleMatch can't run fillScreen safely (it executes
+  // inside the drain path), so it sets a flag and we clear here on the first
+  // tick after entering an animation state.
+  if (matchClearPending) {
+    matchClearPending = false;
+    gfx->fillScreen(matchBg565);
+    if (matchTarget == 0) drawMatchNumber(0, matchFg565);
+  }
+
+  uint32_t now = millis();
+
+  switch (matchState) {
+
+    case MATCH_NUMBER_ROLLING: {
+      // Eased step: faster at start, slower as we approach matchTarget.
+      // Step interval = 20ms + (matchCurrent / matchTarget) * 200ms,
+      // so e.g. at 90% of target each step is ~200 ms (老虎机 stop感).
+      int target = matchTarget;
+      uint32_t progress_pct = (matchCurrent * 100) / max(target, 1);
+      uint32_t step_ms = 20 + (progress_pct * 200) / 100;
+      if (now - matchLastTickMs >= step_ms) {
+        matchLastTickMs = now;
+        matchCurrent++;
+        if (matchCurrent >= target) {
+          matchCurrent = target;
+          drawMatchNumber(matchCurrent, matchFg565);
+          matchState = MATCH_NUMBER_STATIC;
+          matchPhaseStartMs = now;
+        } else {
+          drawMatchNumber(matchCurrent, matchFg565);
+        }
+      }
+      break;
+    }
+
+    case MATCH_NUMBER_STATIC: {
+      // Hold for 3 s. The number is already on screen (drawn either by the
+      // ROLLING tail or by the deferred-clear branch when score=0).
+      if (now - matchPhaseStartMs >= 3000) {
+        matchState = MATCH_NUMBER_FADING;
+        matchPhaseStartMs = now;
+      }
+      break;
+    }
+
+    case MATCH_NUMBER_FADING: {
+      // 500 ms fade — 10 frames at 50 ms each.
+      uint32_t elapsed = now - matchPhaseStartMs;
+      if (elapsed >= 500) {
+        // Fully faded; clear and move to hint phase.
+        gfx->fillScreen(matchBg565);
+        matchState = MATCH_HINT_FADING_IN;
+        matchPhaseStartMs = now;
+      } else {
+        // Re-draw with progressively bg-mixed color.
+        uint8_t t = 255 - (elapsed * 255 / 500);  // 255 → 0 over 500ms
+        uint16_t faded = mix565(matchFg565, matchBg565, t);
+        drawMatchNumber(matchCurrent, faded);
+      }
+      break;
+    }
+
+    case MATCH_HINT_FADING_IN: {
+      // 600 ms fade-in for the hint text.
+      uint32_t elapsed = now - matchPhaseStartMs;
+      if (elapsed >= 600) {
+        drawMatchHint(matchFg565);
+        matchState = MATCH_HINT_STATIC;
+        matchPhaseStartMs = now;
+      } else {
+        uint8_t t = (elapsed * 255) / 600;
+        uint16_t fading = mix565(matchFg565, matchBg565, t);
+        drawMatchHint(fading);
+      }
+      break;
+    }
+
+    case MATCH_HINT_STATIC: {
+      if (now - matchPhaseStartMs >= 5000) {
+        matchState = MATCH_IDLE;
+        outerDirty = true;   // re-arm avatar repaint
+      }
+      break;
+    }
+
+    default: break;
+  }
+}
+
+
 // ---- Serial line parsing ---------------------------------------------------
 void handleLine(const String &line) {
   // 512 B leaves headroom for the interests array (up to 3 × {icon,label}
   // on top of the base ~130 B payload). Bump if new fields are added.
-  StaticJsonDocument<512> doc;
+  // Stage 3 match payloads are larger (peer_avatar object + common array
+  // + hint string up to 80 chars) so we use a separate 1024 B doc inline.
+  StaticJsonDocument<1024> doc;
   DeserializationError err = deserializeJson(doc, line);
   if (err) {
     Serial.printf("[serial_avatar] JSON parse err: %s\n", err.c_str());
+    return;
+  }
+
+  // Stage 3 match messages carry type="match". Anything without a type
+  // (or with type="avatar") is the legacy avatar-state path. This keeps
+  // stage 1 + stage 2 working unchanged.
+  const char* msgType = doc["type"] | "avatar";
+  if (strcmp(msgType, "match") == 0) {
+    handleMatch(doc);
+    return;
+  }
+
+  // Defensive check: a real avatar packet always has at least one of the
+  // core identity fields (sex / color / num). If a truncated frame (e.g.
+  // tail end of a coalesced match payload) sneaks past deserializeJson but
+  // has no avatar fields, the legacy path below would silently apply
+  // default-zero values to st and flip outerDirty — turning the screen
+  // into a blank "default avatar" without the user doing anything.
+  // Reject those frames here so the screen stays on whatever it was.
+  bool hasAvatarField = doc["sex"].is<const char*>()
+                     || doc["color"].is<int>()
+                     || doc["num"].is<int>()
+                     || doc["mood"].is<int>();
+  if (!hasAvatarField) {
+    Serial.println("[serial_avatar] dropped: no type=match and no avatar fields (likely truncated frame)");
     return;
   }
 
@@ -636,73 +1043,50 @@ void handleLine(const String &line) {
 }
 
 
-// ---- Heart rate detection --------------------------------------------------
-// Polled at 50 Hz. Updates hr_currentBpm in-place. Call from loop().
-void hrTick(uint32_t now) {
-  if (now - hr_lastSampleMs < HR_SAMPLE_MS) return;
-  hr_lastSampleMs = now;
+// ---- NFC polling -----------------------------------------------------------
+// Read one tap per call (or fast-return if cooling down / animation playing /
+// no card in field). On success, emit a JSON line on Serial — device.js's
+// startReadLoop already forwards `{...}` lines as `device:message` window
+// events, so no new wire protocol is needed. The web side (stage3.html) picks
+// these up and routes them to doTap(uid).
+//
+// UID format intentionally matches STAGE3_USERS dict keys in server.py:
+// uppercase hex, colon-separated (e.g. "75:91:49:A7"). Any drift here causes
+// silent 404s from /api/tap.
+void pollNFC() {
+  if (!nfcReady) return;
+  uint32_t now = millis();
+  if (now - nfcLastTapMs < NFC_DEBOUNCE_MS) return;   // cool-down
+  if (matchState != MATCH_IDLE) return;                // animation owns the screen
 
-  int v = analogRead(HR_PIN);   // ESP32 default: 0..4095, 12-bit
-
-#if HR_DEBUG
-  // Throttled raw dump for threshold tuning. Format: line per 200 ms.
-  // Watch the spread (max-min) over a few seconds — peak amplitude
-  // tells you what HR_RISE_THRESH should be.
-  static uint32_t hr_dbgLastMs = 0;
-  if (now - hr_dbgLastMs >= 200) {
-    hr_dbgLastMs = now;
-    Serial.printf("[hr] raw=%4d  base=%4d  diff=%+4d\n", v, hr_baseline, v - hr_baseline);
+  uint8_t uid[7] = {0};
+  uint8_t uidLen = 0;
+  if (!nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A,
+                                uid, &uidLen, NFC_POLL_TIMEOUT)) {
+    return;   // no card this poll
   }
-#endif
+  nfcLastTapMs = now;
 
-  // Baseline tracking: rolling mean over HR_BASELINE_N samples.
-  hr_baselineSum += v;
-  hr_baselineN++;
-  if (hr_baselineN >= HR_BASELINE_N) {
-    hr_baseline = hr_baselineSum / hr_baselineN;
-    hr_baselineSum = 0;
-    hr_baselineN = 0;
+  // Build "AA:BB:CC:DD" string. snprintf "%02X" is uppercase by default.
+  char uidStr[24] = {0};
+  size_t off = 0;
+  for (uint8_t i = 0; i < uidLen && off + 4 < sizeof(uidStr); i++) {
+    off += snprintf(uidStr + off, sizeof(uidStr) - off,
+                    i == 0 ? "%02X" : ":%02X", uid[i]);
   }
 
-  // Edge detect: signal crossing baseline+threshold from below = beat.
-  bool above = (v > hr_baseline + HR_RISE_THRESH);
-  if (above && !hr_above) {
-    // Rising edge → candidate beat. Reject if too soon (would imply >200 BPM).
-    if (hr_lastBeatMs != 0 && (now - hr_lastBeatMs) > 300) {
-      uint32_t interval = now - hr_lastBeatMs;
-      hr_intervals[hr_intervalIdx] = interval;
-      hr_intervalIdx = (hr_intervalIdx + 1) % 3;
-      if (hr_intervalCount < 3) hr_intervalCount++;
-
-      // Compute BPM from the average of available intervals.
-      uint32_t sum = 0;
-      for (int i = 0; i < hr_intervalCount; i++) sum += hr_intervals[i];
-      uint32_t avg = sum / hr_intervalCount;
-      if (avg > 0) hr_currentBpm = (int)(60000UL / avg);
-    }
-    hr_lastBeatMs = now;
-  }
-  hr_above = above;
-
-  // If no beat for 3 s, declare "no signal" (finger lifted).
-  if (hr_lastBeatMs != 0 && (now - hr_lastBeatMs) > 3000) {
-    hr_currentBpm = 0;
-    hr_intervalCount = 0;
-  }
-}
-
-// Periodically push current BPM to web. Cheap one-line JSON; web ignores
-// it if it has no listener. Always emit (even bpm=0) so the web side knows
-// we're alive and can show "no finger detected".
-void hrReport(uint32_t now) {
-  if (now - hr_lastReportMs < HR_REPORT_MS) return;
-  hr_lastReportMs = now;
-  Serial.printf("{\"hr\":%d}\n", hr_currentBpm);
+  Serial.printf("{\"type\":\"tap\",\"uid\":\"%s\"}\n", uidStr);
 }
 
 
 // ---- Arduino entry points --------------------------------------------------
 void setup() {
+  // Stage 3 match packets are ~354 B in one write; the default USB-CDC RX
+  // FIFO is 256 B, so a single match line silently drops bytes before
+  // loop()'s drain ever sees them — handleLine never fires, no parse err,
+  // no overflow log, just a screen that doesn't animate. Must be called
+  // before Serial.begin() (ESP32 Arduino core requirement).
+  Serial.setRxBufferSize(2048);
   Serial.begin(115200);
   delay(200);
   Serial.println("\n[serial_avatar] booting");
@@ -715,16 +1099,46 @@ void setup() {
     while (1) delay(1000);
   }
 
-  // Heart rate ADC. analogReadResolution sets 12-bit (default on ESP32-C6
-  // anyway, but explicit avoids surprises if Arduino-ESP32 changes default).
-  pinMode(HR_PIN, INPUT);
-  analogReadResolution(12);
-
   renderWaiting();
   Serial.printf("[serial_avatar] ready — %d sprites loaded\n", SPRITES_COUNT);
+
+  // NFC bring-up. Failure is non-fatal — the firmware still works as a pure
+  // serial-driven avatar (the original stage1/2 code path) so a busted PN532
+  // shouldn't brick the demo. We just won't auto-emit tap events.
+  Wire.begin(NFC_I2C_SDA, NFC_I2C_SCL);
+  nfc.begin();
+  uint32_t v = nfc.getFirmwareVersion();
+  if (v) {
+    Serial.printf("[serial_avatar] NFC ready, PN532 fw %d.%d (chip 0x%02X)\n",
+                  (uint8_t)(v >> 16) & 0xFF,
+                  (uint8_t)(v >>  8) & 0xFF,
+                  (uint8_t)(v >> 24) & 0xFF);
+    nfc.SAMConfig();
+    nfcReady = true;
+  } else {
+    Serial.println("[serial_avatar] NFC init FAILED — check DIP (1=ON,2=OFF) and wiring; running without NFC");
+  }
 }
 
 void loop() {
+  // NFC polling first — internal guards (debounce + animation-busy check)
+  // make this a sub-millisecond no-op when there's nothing to do, so it's
+  // safe to run every loop iteration. A successful poll emits a JSON line
+  // on Serial; the web side (stage3.html) handles routing via /api/tap.
+  pollNFC();
+
+  // Pick up any frame that finished arriving during a render-time drain.
+  // pendingLine is the newest-wins hand-off slot from drainSerialIntoBuf;
+  // dispatching here means handleLine runs outside the drain path (safe to
+  // do blocking SPI work like fillScreen for the next match animation).
+  // Only do this when the screen isn't currently busy — otherwise we'd
+  // re-enter handleMatch mid-animation and corrupt state.
+  if (pendingLine.length() > 0 && matchState == MATCH_IDLE) {
+    String frame = pendingLine;
+    pendingLine = "";
+    handleLine(frame);
+  }
+
   // Drain Serial
   while (Serial.available() > 0) {
     char c = (char)Serial.read();
@@ -733,8 +1147,24 @@ void loop() {
       if (lineBuf.length() > 0) { handleLine(lineBuf); lineBuf = ""; }
     } else {
       lineBuf += c;
-      if (lineBuf.length() > 320) lineBuf = "";
+      // Buffer ceiling matches StaticJsonDocument (1024 B). Stage 3 match
+      // payloads measure ~390 B; stage 1 avatar packets ~130 B. If a line
+      // ever exceeds this, log loudly so the truncation is visible — the
+      // old silent 320 B drop produced a "waiting" screen with no clue why.
+      if (lineBuf.length() > 1024) {
+        Serial.printf("[serial_avatar] line buffer overflow at %u bytes — dropping\n",
+                      lineBuf.length());
+        lineBuf = "";
+      }
     }
+  }
+
+  // Match-screen animation owns the display while non-IDLE — suspend the
+  // regular avatar redraw path so the rolling number / hint text aren't
+  // overwritten between frames.
+  if (matchState != MATCH_IDLE) {
+    tickMatchAnimation();
+    return;
   }
 
   // Outer redraw if state changed
@@ -744,12 +1174,6 @@ void loop() {
   }
 
   uint32_t now = millis();
-
-  // Heart rate sampling + periodic report. Independent of sprite state —
-  // runs even before web has connected, so the first connect can pick up
-  // a valid BPM immediately.
-  hrTick(now);
-  hrReport(now);
 
   // Inner-frame animation
   if (st.valid && (now - lastAnimMs >= ANIM_INTERVAL_MS)) {

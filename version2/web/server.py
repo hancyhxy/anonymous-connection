@@ -73,6 +73,138 @@ def broadcast(event: str, payload: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Stage 3 — NFC tap → match flow.
+#
+# Architecture (intentionally mirrors the existing SSE pattern, no WebSocket):
+#   - 5 demo users are hardcoded by NFC sticker UID (STAGE3_USERS).
+#   - Browser representing "me" picks a my_user_id (later: read from device).
+#   - When NFC tap fires, browser POSTs /api/tap with peer_uid.
+#   - Server looks up both users, computes a fluffy match score + picks a
+#     hint based on common interests, broadcasts a "match" event to all
+#     /events_stage3 SSE subscribers (later: only push to the matched pair).
+#
+# Score is intentionally NOT serious — it's animation candy. Common-count /3
+# gives 4 buckets (0/33/66/99%) which are visually distinct and easy to
+# explain. We don't use Jaccard because (a) the user said "don't be too
+# serious", (b) discrete buckets are cleaner for a number-rolling animation.
+# ---------------------------------------------------------------------------
+STAGE3_USERS = {
+    # UIDs match physical sticker labels 1-5 from the bring-up session.
+    # interests chosen to span the score buckets w.r.t. user_1:
+    #   user_1 ↔ user_2: 66% (music+film common)
+    #   user_1 ↔ user_3: 33% (film common)
+    #   user_1 ↔ user_4:  0% (no overlap)
+    #   user_1 ↔ user_5: 66% (music+art common)
+    "75:91:49:A7": {
+        "user_id":   "u1",
+        "label":     "sticker 1",
+        "avatar":    {"sex": "female", "color": 2, "num": 1, "smile": True,
+                      "mood": 1, "bg_level": 4},
+        "interests": ["music", "film", "art"],
+        "quote":     "open to chat",
+    },
+    "65:BC:56:A7": {
+        "user_id":   "u2",
+        "label":     "sticker 2",
+        "avatar":    {"sex": "male", "color": 1, "num": 0, "smile": False,
+                      "mood": 1, "bg_level": 3},
+        "interests": ["music", "film", "tech"],
+        "quote":     "say hi",
+    },
+    "65:D5:7F:A7": {
+        "user_id":   "u3",
+        "label":     "sticker 3",
+        "avatar":    {"sex": "female", "color": 0, "num": 2, "smile": False,
+                      "mood": 0, "bg_level": 2},
+        "interests": ["film", "books", "photo"],
+        "quote":     "daydreaming",
+    },
+    "65:E9:22:A7": {
+        "user_id":   "u4",
+        "label":     "sticker 4",
+        "avatar":    {"sex": "male", "color": 3, "num": 1, "smile": True,
+                      "mood": 2, "bg_level": 5},
+        "interests": ["sport", "food", "gaming"],
+        "quote":     "need coffee",
+    },
+    "75:2A:E7:A7": {
+        "user_id":   "u5",
+        "label":     "sticker 5",
+        "avatar":    {"sex": "female", "color": 4, "num": 0, "smile": True,
+                      "mood": 4, "bg_level": 5},
+        "interests": ["music", "art", "dance"],
+        "quote":     "same vibe?",
+    },
+}
+
+# One open-ended question per primary interest. Picked when two users share
+# that interest. For 0% match (no common), we fall back to FALLBACK_HINT.
+INTEREST_HINTS = {
+    "music":  "what's been on repeat for you this week?",
+    "film":   "a film you'd hand to a stranger right now?",
+    "sport":  "what move did your body need today?",
+    "art":    "last thing you saw that stopped you mid-step?",
+    "tech":   "the side project you keep almost starting?",
+    "food":   "something you cooked or ate that surprised you?",
+    "gaming": "a game world you wish you lived in for a week?",
+    "travel": "a place you'd go back to without hesitating?",
+    "books":  "a sentence from a book that's still with you?",
+    "photo":  "the shot you almost took but didn't?",
+    "dance":  "a song that makes you move without thinking?",
+    "pets":   "an animal that recently made your day?",
+}
+FALLBACK_HINT = "you two picked totally different things — what's the most surprising thing you've done lately?"
+
+# Stickers are dealt to classmates by physical label (1-5). The web form
+# collects "I am sticker N", and the server maps that to the underlying UID
+# so submitted DIY data overrides the hardcoded fixture above.
+STICKER_NUM_TO_UID = {
+    1: "75:91:49:A7",
+    2: "65:BC:56:A7",
+    3: "65:D5:7F:A7",
+    4: "65:E9:22:A7",
+    5: "75:2A:E7:A7",
+}
+
+# Stage 3 has its own SSE subscriber list, separate from collective wall.
+_stage3_subscribers: list[Queue] = []
+_stage3_subs_lock   = threading.Lock()
+
+def stage3_broadcast(event: str, payload: dict) -> None:
+    msg = f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+    with _stage3_subs_lock:
+        for q in list(_stage3_subscribers):
+            try: q.put_nowait(msg)
+            except Exception: pass
+
+def compute_match(me_uid: str, peer_uid: str) -> dict | None:
+    """Return a match payload for the (me, peer) UID pair, or None if either
+    UID is unknown. Score is common_count / 3 → 0/33/66/99 — score is
+    deliberately fluffy, just feeds the number-rolling animation."""
+    me   = STAGE3_USERS.get(me_uid)
+    peer = STAGE3_USERS.get(peer_uid)
+    if not me or not peer or me_uid == peer_uid:
+        return None
+    common = sorted(set(me["interests"]) & set(peer["interests"]))
+    score  = round(len(common) * 33) if common else 0
+    if score == 99: score = 100      # cosmetic: 3/3 reads as 100%, not 99%
+    hint = INTEREST_HINTS[common[0]] if common else FALLBACK_HINT
+    return {
+        "ts":           datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "me_uid":       me_uid,
+        "peer_uid":     peer_uid,
+        "me_user_id":   me["user_id"],
+        "peer_user_id": peer["user_id"],
+        "score":        score,
+        "common":       common,
+        "hint":         hint,
+        "peer_avatar":  peer["avatar"],
+        "peer_quote":   peer["quote"],
+        "peer_label":   peer["label"],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
 @app.route("/")
@@ -82,6 +214,10 @@ def index():
 @app.route("/collective")
 def collective():
     return send_from_directory(str(ROOT), "collective.html")
+
+@app.route("/stage3")
+def stage3():
+    return send_from_directory(str(ROOT), "stage3.html")
 
 @app.route("/api/users")
 def api_users():
@@ -105,6 +241,33 @@ def submit():
     profile = request.get_json(silent=True)
     if not isinstance(profile, dict):
         return jsonify({"error": "invalid payload"}), 400
+
+    # Optional: classmate self-reports their sticker number (1-5). When
+    # present, also overlay this submission onto STAGE3_USERS so my ESP32
+    # tap reads their DIY data instead of the hardcoded fixture. The sticker
+    # field is stripped before saving to users.json — it's a routing hint,
+    # not part of the avatar profile.
+    sticker_num = profile.pop("sticker", None)
+    if sticker_num is not None:
+        try:
+            uid = STICKER_NUM_TO_UID[int(sticker_num)]
+        except (KeyError, TypeError, ValueError):
+            return jsonify({"error": f"invalid sticker number: {sticker_num}"}), 400
+        STAGE3_USERS[uid] = {
+            "user_id":   f"u{int(sticker_num)}",
+            "label":     f"sticker {int(sticker_num)}",
+            "avatar": {
+                "sex":       profile.get("sex", "male"),
+                "color":     profile.get("color", 0),
+                "num":       profile.get("num", 0),
+                "smile":     profile.get("smile", False),
+                "mood":      profile.get("mood", 0),
+                "bg_level":  profile.get("bg_level", 2),
+            },
+            "interests": profile.get("interests", []),
+            "quote":     profile.get("quote", ""),
+        }
+
     entry = {
         "id":      f"u_{uuid.uuid4().hex[:8]}",
         "ts":      datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -140,6 +303,57 @@ def events():
         "Cache-Control": "no-cache",
         "X-Accel-Buffering": "no",
     })
+
+@app.route("/api/stage3/users")
+def api_stage3_users():
+    """List the hardcoded fixture so stage3.html can render the picker."""
+    return jsonify([
+        {"uid": uid, **{k: v for k, v in u.items() if k != "avatar"},
+         "avatar": u["avatar"]}
+        for uid, u in STAGE3_USERS.items()
+    ])
+
+@app.route("/api/tap", methods=["POST"])
+def api_tap():
+    """Browser → server: 'I (me_uid) just tapped peer_uid.' Server computes
+    match and broadcasts to all stage3 SSE listeners. In MVP the broadcast
+    is fan-out (all listeners see all matches); later we'll filter by user."""
+    body = request.get_json(silent=True) or {}
+    me_uid   = body.get("me_uid")
+    peer_uid = body.get("peer_uid")
+    if not me_uid or not peer_uid:
+        return jsonify({"error": "me_uid and peer_uid required"}), 400
+    match = compute_match(me_uid, peer_uid)
+    if not match:
+        return jsonify({"error": "unknown uid or self-tap",
+                        "me_uid": me_uid, "peer_uid": peer_uid}), 404
+    stage3_broadcast("match", match)
+    return jsonify({"ok": True, "match": match})
+
+@app.route("/events_stage3")
+def events_stage3():
+    """SSE stream for Stage 3 match events."""
+    q: Queue = Queue(maxsize=64)
+    with _stage3_subs_lock:
+        _stage3_subscribers.append(q)
+
+    def gen():
+        try:
+            yield ": connected\n\n"
+            while True:
+                try:
+                    yield q.get(timeout=15)
+                except Empty:
+                    yield ": ping\n\n"
+        finally:
+            with _stage3_subs_lock:
+                if q in _stage3_subscribers: _stage3_subscribers.remove(q)
+
+    return Response(gen(), mimetype="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    })
+
 
 @app.route("/admin/clear", methods=["POST"])
 def admin_clear():
@@ -199,6 +413,7 @@ def print_banner():
     print()
     print(f"[server]  stage 1 (phone): {url}")
     print(f"[server]  collective wall: http://localhost:{PORT}/collective")
+    print(f"[server]  stage 3 (tap)  : http://localhost:{PORT}/stage3")
     print(f"[server]  admin (clear)  : http://localhost:{PORT}/admin")
     print()
     try:
