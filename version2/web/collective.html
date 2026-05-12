@@ -11,10 +11,11 @@
     <!-- avatar tiles inserted by collective.js, absolutely positioned. -->
   </main>
 
-  <!-- Scan-to-join overlay. Hidden by default. Toggled from the panel
-       so the host controls when newcomers can join (and so the wall
-       isn't cluttered while the avatars are the focus).
-       Click outside the card OR press ESC OR press the × to dismiss. -->
+  <!-- Join-QR modal — center-anchored full-screen overlay toggled by the
+       panel's "show join QR" button. QR encodes the bare stage-1 URL
+       (no ?sticker=N), so anyone scanning it adds a wall-only tile
+       without overlaying any physical board's slot. Three independent
+       dismiss paths: × button, backdrop click, ESC key. -->
   <div id="qr-overlay" class="qr-overlay" hidden>
     <div class="qr-card-large">
       <button type="button" id="qr-close" class="qr-close" aria-label="close">×</button>
@@ -23,29 +24,31 @@
     </div>
   </div>
 
-  <!-- bottom-corner counter; hidden if you'd rather a pure visual -->
+  <!-- Bottom-corner counter + similarity hint. Each viewer has their own
+       physical sticker QR, so the wall-side scan-to-join overlay is gone;
+       this row is now the only persistent UI element besides the tiles.
+       The hint clues the audience in on what the spatial layout means
+       (force-directed similarity), since mood/interest are no longer
+       surfaced as legends. -->
   <div id="status-pill" class="status-pill">
     <span id="count">0</span> profiles
+    <span class="status-sep" aria-hidden="true">·</span>
+    <span class="status-hint">the closer they are, the more they have in common</span>
   </div>
 
-  <!-- Mood color legend — sits next to the profile counter so viewers
-       can map a tile's tint back to the mood the user picked. -->
-  <div id="mood-legend" class="mood-legend" aria-label="Mood color legend">
-    <span class="mood-chip"><span class="mood-swatch" style="background:#8aa84a"></span>chill</span>
-    <span class="mood-chip"><span class="mood-swatch" style="background:#42a8d8"></span>curious</span>
-    <span class="mood-chip"><span class="mood-swatch" style="background:#e870c0"></span>playful</span>
-    <span class="mood-chip"><span class="mood-swatch" style="background:#9a968d"></span>tired</span>
-    <span class="mood-chip"><span class="mood-swatch" style="background:#ecb548"></span>glowing</span>
-  </div>
-
-  <!-- Live layout tuner. Panel.collapsed via header button. State persists
-       in localStorage so it stays the way you left it across reloads. -->
-  <aside id="debug-panel" aria-label="Layout debug panel">
+  <!-- Live layout + mock tuner. Panel.collapsed via header button. State
+       persists in localStorage so it stays the way you left it across
+       reloads. Two sections: Layout (force-directed tuning) and Mock
+       (filler-data control). -->
+  <aside id="debug-panel" aria-label="Demo control panel">
     <header class="debug-header">
-      <span class="debug-title">layout</span>
+      <span class="debug-title">controls</span>
       <button type="button" id="debug-toggle" aria-label="collapse">▾</button>
     </header>
     <div class="debug-body">
+
+      <!-- ─── Section: Layout ───────────────────────────── -->
+      <div class="debug-section-title">Layout</div>
 
       <label class="debug-row">
         <span class="debug-label">tile size</span>
@@ -75,16 +78,54 @@
       </label>
       <div class="debug-hint">how strongly similarity pulls them together</div>
 
-      <label class="debug-toggle-row">
-        <span>show join QR</span>
-        <span class="toggle">
-          <input type="checkbox" id="t-showQR">
-          <span class="toggle-slider"></span>
-        </span>
-      </label>
+      <button type="button" id="debug-reset" class="debug-reset">reset to defaults</button>
+
+      <!-- ─── Section: Mock ─────────────────────────────────────
+           Three submission channels, three rows. Each row pairs a
+           show/hide checkbox with a per-channel clear button so the
+           operator can mute or wipe each source independently:
+             Hardware  — physical sticker scans (?sticker=1..5)
+             Scanned   — join-QR scans on the wall (no sticker)
+             Mock      — seed-mock button below
+           A `clear all` at the bottom wipes the lot. -->
+      <div class="debug-section-title">Mock</div>
+
+      <div class="channel-row">
+        <label class="channel-label">
+          <input type="checkbox" id="t-showHardware" checked>
+          <span>Hardware</span>
+        </label>
+        <button type="button" id="debug-clear-hardware" class="channel-clear">clear</button>
+      </div>
+
+      <div class="channel-row">
+        <label class="channel-label">
+          <input type="checkbox" id="t-showScanned" checked>
+          <span>Scanned</span>
+        </label>
+        <button type="button" id="debug-clear-scanned" class="channel-clear">clear</button>
+      </div>
+
+      <div class="channel-row">
+        <label class="channel-label">
+          <input type="checkbox" id="t-showMock" checked>
+          <span>Mock</span>
+        </label>
+        <button type="button" id="debug-clear-mock" class="channel-clear">clear</button>
+      </div>
 
       <button type="button" id="debug-clear-data" class="debug-clear">clear all profiles</button>
-      <button type="button" id="debug-reset" class="debug-reset">reset to defaults</button>
+
+      <label class="debug-row">
+        <span class="debug-label">mock count</span>
+        <input type="number" id="t-mockCount" min="1" max="100" step="1" value="25" class="debug-number">
+      </label>
+      <div class="debug-hint">how many synthetic tiles to inject</div>
+
+      <button type="button" id="debug-seed-mock" class="debug-seed">seed mock</button>
+
+      <button type="button" id="debug-show-qr" class="debug-show-qr">show join QR</button>
+
     </div>
   </aside>
 

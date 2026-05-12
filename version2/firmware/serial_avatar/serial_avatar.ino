@@ -1057,26 +1057,34 @@ void drawCommonScreen(uint16_t fg) {
   const int CAPTION_GAP = 8;
   const int CELL_W_2X   = 16;
   const bool hasTags  = matchCommonTags.length() > 0;
-  const char* caption = hasTags ? "you both like" : "you are so different,";
+  const char* caption = hasTags ? "you both like" : "different vibes,";
   const char* body    = hasTags ? matchCommonTags.c_str() : "but...";
 
-  // Wrap body so long tag lists (e.g. "sci-fi, indie, painting") don't
-  // overrun screen width. Caption is always one line — pre-known short.
+  // Wrap both caption and body — drawString2x silently clips on overflow,
+  // so anything > 15 cells (15 × 16 px = 240 px screen width) must be
+  // wrapped, not assumed-short. v13.7 fix: caption was previously rendered
+  // raw, which silently clipped "different vibes," (16 cells) on the demo
+  // unit; now it goes through wrapHint same as body.
+  String caption_lines[2];
+  int n_cap = wrapHint(caption, MAX_CHARS, caption_lines, 2);
   String body_lines[MAX_LINES];
   int n_body = wrapHint(body, MAX_CHARS, body_lines, MAX_LINES);
-  if (n_body == 0) return;
+  if (n_cap == 0 || n_body == 0) return;
 
-  // Layout: caption + gap + body lines, vertically centered as a block.
-  int16_t total_h = (int16_t)(LINE_H + CAPTION_GAP + n_body * LINE_H);
+  // Layout: caption (n_cap lines) + gap + body (n_body lines), vertically centered.
+  int16_t total_h = (int16_t)(n_cap * LINE_H + CAPTION_GAP + n_body * LINE_H);
   int16_t y = (240 - total_h) / 2;
 
-  size_t cap_cells = countCells(caption);
-  int16_t cap_w = (int16_t)(cap_cells * CELL_W_2X);
-  int16_t cap_x = (240 - cap_w) / 2;
-  drawString2x(cap_x, y, caption, cap_cells, fg, matchBg565);
-  drainSerialIntoBuf();
+  for (int li = 0; li < n_cap; li++) {
+    size_t cells  = countCells(caption_lines[li].c_str());
+    int16_t line_w = (int16_t)(cells * CELL_W_2X);
+    int16_t x = (240 - line_w) / 2;
+    drawString2x(x, y + li * LINE_H, caption_lines[li].c_str(),
+                 cells, fg, matchBg565);
+    drainSerialIntoBuf();
+  }
 
-  int16_t body_y = y + LINE_H + CAPTION_GAP;
+  int16_t body_y = y + n_cap * LINE_H + CAPTION_GAP;
   for (int li = 0; li < n_body; li++) {
     size_t cells  = countCells(body_lines[li].c_str());
     int16_t line_w = (int16_t)(cells * CELL_W_2X);

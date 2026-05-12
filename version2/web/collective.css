@@ -125,10 +125,10 @@ html, body {
   line-height: 0.5;
 }
 
-/* Primary-interest row — pinned to the tile bottom, mirrors the
-   web preview's #preview-interests visual language (icon+label
-   pairs with mid-dot separators). Hidden when no primaries picked.
-   Position uses % so it scales with tile size (preview uses 40px/420 ≈ 9%). */
+/* Nickname row — pinned to the tile bottom, occupies the slot that
+   originally held the primary-interest row (class name `.tile-interests`
+   kept for CSS reuse). Hidden when nickname is blank. Position uses %
+   so it scales with tile size. */
 .avatar-tile .tile-interests {
   position: absolute;
   bottom: 6%;
@@ -146,16 +146,19 @@ html, body {
   z-index: 2;
 }
 .avatar-tile .tile-interests[data-empty="1"] { display: none; }
-.avatar-tile .tile-interest {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
+.avatar-tile .tile-nickname {
   white-space: nowrap;
+  letter-spacing: 0.02em;
 }
-.avatar-tile .tile-interest-sep {
-  opacity: 0.4;
-  user-select: none;
-}
+
+/* Per-channel visibility filter. ensureTile() tags each tile with a
+   data-source attribute (A/B/C). When the operator unchecks a channel
+   in the panel, we set body.hide-{channel}; CSS hides every tile of
+   that source. Pure CSS filter; the data attribute is set once on
+   tile creation and never touched again. */
+body.hide-hardware .avatar-tile[data-source="A"] { display: none; }
+body.hide-scanned  .avatar-tile[data-source="B"] { display: none; }
+body.hide-mock     .avatar-tile[data-source="C"] { display: none; }
 
 /* ──────────────────────────────────────────────
    Debug panel (right side) — live layout tuner.
@@ -239,53 +242,6 @@ html, body {
   border-radius: 3px;
   font-size: 0.62rem;
 }
-/* iOS-style toggle for the join-QR switch in the panel. */
-.debug-toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin: 14px 0 10px;
-  font-size: 0.78rem;
-  color: #b0b0b8;
-  cursor: pointer;
-}
-.toggle {
-  position: relative;
-  display: inline-block;
-  width: 36px;
-  height: 20px;
-}
-.toggle input {
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
-.toggle-slider {
-  position: absolute;
-  inset: 0;
-  background: #3a3a42;
-  border-radius: 999px;
-  transition: background 0.15s;
-}
-.toggle-slider::before {
-  content: "";
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
-  background: #888892;
-  border-radius: 50%;
-  transition: transform 0.15s, background 0.15s;
-}
-.toggle input:checked + .toggle-slider {
-  background: rgba(126, 200, 227, 0.35);
-}
-.toggle input:checked + .toggle-slider::before {
-  transform: translateX(16px);
-  background: #7ec8e3;
-}
-
 .debug-reset, .debug-clear {
   margin-top: 6px;
   width: 100%;
@@ -315,32 +271,196 @@ html, body {
   background: rgba(232, 123, 123, 0.08);
 }
 
-/* ──────────────────────────────────────────────
-   Scan-to-join overlay — toggled from the debug panel.
-   Center-anchored, large QR so it's readable from across a room.
-   Backdrop dims the wall slightly to draw eyes to the QR.
-   ────────────────────────────────────────────── */
+/* Section header inside the panel — separates Layout knobs from Mock
+   controls without forcing a second collapsible card. */
+.debug-section-title {
+  margin: 14px 0 6px;
+  padding-top: 12px;
+  border-top: 1px solid #2a2a32;
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6e6e78;
+}
+/* Compact number input — same row treatment as the range sliders so
+   the form reads as a single grid. */
+.debug-number {
+  width: 56px;
+  margin-left: auto;
+  padding: 3px 6px;
+  background: #1a1a22;
+  border: 1px solid #3a3a42;
+  border-radius: 4px;
+  color: #d0d0d8;
+  font-size: 0.78rem;
+  font-family: inherit;
+  text-align: right;
+}
+.debug-number:focus {
+  outline: none;
+  border-color: #7ec8e3;
+}
+/* Seed-mock button — accent variant, signals "additive action". */
+.debug-seed {
+  margin-top: 6px;
+  width: 100%;
+  padding: 6px;
+  background: rgba(126, 200, 227, 0.08);
+  border: 1px solid #3a5a6a;
+  border-radius: 4px;
+  color: #7ec8e3;
+  font-size: 0.7rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+.debug-seed:hover {
+  border-color: #7ec8e3;
+  background: rgba(126, 200, 227, 0.16);
+}
+/* Clear-mock-only — same red as clear-all but a touch softer
+   (only removes synthetic data, real submissions are preserved). */
+.debug-clear-mock {
+  margin-top: 6px;
+  width: 100%;
+  padding: 6px;
+  background: transparent;
+  border: 1px solid #5a3a3a;
+  border-radius: 4px;
+  color: #b88;
+  font-size: 0.7rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+.debug-clear-mock:hover {
+  border-color: #e87b7b;
+  color: #e87b7b;
+  background: rgba(232, 123, 123, 0.06);
+}
+/* Checkbox row — left-aligned label + native checkbox. Used by
+   show-QR and hide-mock toggles. */
+.debug-checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 0.78rem;
+  color: #b0b0b8;
+  cursor: pointer;
+}
+.debug-checkbox-row input[type="checkbox"] {
+  accent-color: #7ec8e3;
+  cursor: pointer;
+}
+
+/* Status pill — bottom-right counter + similarity hint.
+   Low contrast so it doesn't compete with the avatars. The hint sits
+   inline with the count; a thin · separator keeps them visually grouped
+   while letting either piece read on its own. */
+.status-pill {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  padding: 6px 14px;
+  background: rgba(255,255,255,0.06);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: #888892;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  pointer-events: none;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.status-sep {
+  opacity: 0.5;
+}
+.status-hint {
+  font-style: italic;
+  letter-spacing: 0.02em;
+  color: #9a9aa3;
+}
+
+/* Channel row — one line per submission source (Hardware/Scanned/Mock).
+   Layout: [checkbox + label] · [clear button] stretching to fill width.
+   Each row visually mirrors the others so the operator sees the three
+   channels as a peer group, not "mock + miscellaneous". */
+.channel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 8px 0;
+  gap: 8px;
+}
+.channel-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  color: #d0d0d8;
+  cursor: pointer;
+  flex: 1;
+}
+.channel-label input[type="checkbox"] {
+  accent-color: #7ec8e3;
+  cursor: pointer;
+}
+.channel-clear {
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid #5a3a3a;
+  border-radius: 4px;
+  color: #b88;
+  font-size: 0.68rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+.channel-clear:hover {
+  border-color: #e87b7b;
+  color: #e87b7b;
+  background: rgba(232, 123, 123, 0.06);
+}
+
+/* Show-QR button — neutral action that triggers the modal. Visually
+   distinct from the clear/seed buttons so it doesn't read as a
+   destructive or additive action. */
+.debug-show-qr {
+  margin-top: 8px;
+  width: 100%;
+  padding: 6px;
+  background: transparent;
+  border: 1px solid #3a3a42;
+  border-radius: 4px;
+  color: #888892;
+  font-size: 0.7rem;
+  cursor: pointer;
+  font-family: inherit;
+}
+.debug-show-qr:hover {
+  border-color: #7ec8e3;
+  color: #7ec8e3;
+}
+
+/* Join-QR modal — full-screen dim backdrop + centered white card.
+   Higher z-index than panel so the overlay sits on top of everything.
+   pointer-events on the overlay so backdrop clicks register; the panel
+   underneath is still clickable because we close the modal on backdrop
+   click anyway (operator's intent: dismiss). */
 .qr-overlay {
   position: fixed;
-  top: 0;
-  left: 0;
-  bottom: 0;
-  /* Leave room for the right-side panel so its toggle / sliders stay
-     clickable while the overlay is up. 308 = 16 (panel-right) +
-     260 (panel-width) + 32 (gap). Without this, the overlay's z-index
-     would eat all clicks on the panel and the user couldn't toggle off. */
-  right: 308px;
+  inset: 0;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: rgba(20, 20, 24, 0.55);
+  background: rgba(20, 20, 24, 0.6);
   backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
   z-index: 25;
 }
 .qr-overlay[hidden] { display: none; }
 .qr-card-large {
-  position: relative;       /* anchor for .qr-close (top-right of card) */
+  position: relative;
   background: #fff;
   border-radius: 12px;
   padding: 24px 24px 16px;
@@ -382,53 +502,4 @@ html, body {
   margin-top: 12px;
   font-family: "SF Mono", Menlo, monospace;
   letter-spacing: 0.08em;
-}
-
-/* Status pill — bottom-right counter, low contrast so it doesn't
-   compete with the avatars. */
-.status-pill {
-  position: fixed;
-  bottom: 16px;
-  right: 16px;
-  padding: 6px 12px;
-  background: rgba(255,255,255,0.06);
-  border-radius: 999px;
-  font-size: 0.75rem;
-  color: #888892;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.04em;
-  pointer-events: none;
-  z-index: 10;
-}
-
-/* Mood color legend — sits to the LEFT of the status-pill. Same low-
-   contrast pill style so it reads as ambient metadata, not a
-   competing element. Swatches use each mood's "steady" palette
-   tint (level 3) as a recognizable representative. */
-.mood-legend {
-  position: fixed;
-  bottom: 16px;
-  right: 116px;          /* clears the status-pill (which is ~88 px wide + 16 right) */
-  display: flex;
-  gap: 10px;
-  padding: 6px 12px;
-  background: rgba(255,255,255,0.06);
-  border-radius: 999px;
-  font-size: 0.72rem;
-  color: #888892;
-  letter-spacing: 0.04em;
-  pointer-events: none;
-  z-index: 10;
-}
-.mood-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.mood-swatch {
-  display: inline-block;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  flex-shrink: 0;
 }

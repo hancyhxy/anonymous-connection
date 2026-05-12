@@ -163,7 +163,7 @@ INTEREST_HINTS = {
     "dance":  "a song that makes you move without thinking?",
     "pets":   "an animal that recently made your day?",
 }
-FALLBACK_HINT = "you two picked totally different things — what's the most surprising thing you've done lately?"
+FALLBACK_HINT = "what surprising thing have you done lately?"
 
 # Stickers are dealt to classmates by physical label (1-5). The web form
 # collects "I am sticker N", and the server maps that to the underlying UID
@@ -315,6 +315,14 @@ def submit():
     if not isinstance(profile, dict):
         return jsonify({"error": "invalid payload"}), 400
 
+    # Pull out the is_mock flag (default false). Submissions from the wall's
+    # "seed mock" button set this to true so the wall UI can later filter
+    # them out via the "hide mock tiles" toggle, while real-audience
+    # submissions stay visible. Like `sticker`, this is a routing hint that
+    # rides on the payload but is NOT part of the avatar profile itself;
+    # we attach it to the persisted entry separately below.
+    is_mock = bool(profile.pop("is_mock", False))
+
     # Optional: classmate self-reports their sticker number (1-5). When
     # present, also overlay this submission onto STAGE3_USERS so my ESP32
     # tap reads their DIY data instead of the hardcoded fixture. The sticker
@@ -362,6 +370,7 @@ def submit():
         "id":      f"u_{uuid.uuid4().hex[:8]}",
         "ts":      datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "profile": profile,
+        "is_mock": is_mock,
     }
     # If this submission claims a sticker, treat sticker number as a stable
     # identity key: any prior users.json entries that selected the same
@@ -553,17 +562,57 @@ def events_stage3():
     })
 
 
+def _entry_source(u: dict) -> str:
+    """Classify a persisted users.json entry into one of three channels:
+      'C' (mock)     — is_mock flag set by /submit
+      'A' (hardware) — has profile.sticker (1..5), entered via physical sticker QR
+      'B' (scanned)  — neither of the above; entered via wall join-QR (bare URL)
+    Used by /admin/clear?source=X to wipe one channel at a time."""
+    if u.get("is_mock"):
+        return "C"
+    if u.get("profile", {}).get("sticker") is not None:
+        return "A"
+    return "B"
+
+
 @app.route("/admin/clear", methods=["POST"])
 def admin_clear():
-    """JSON wipe endpoint for the wall page's clear button. localhost
-    only — same guard as /admin — so phones on the LAN can't reset
-    while the demo is mid-session."""
+    """JSON wipe endpoint. localhost-only — phones on the LAN can't reset
+    mid-session. Optional ?source=hardware|scanned|mock|all selects which
+    channel to wipe; omitting (or 'all') clears everything, matching the
+    original behaviour so the existing 'clear all profiles' button works
+    unchanged. Each cleared entry triggers a 'remove' SSE so connected
+    walls drop the tile via the existing handler."""
     if request.remote_addr not in ("127.0.0.1", "::1"):
         return jsonify({"error": "forbidden"}), 403
+
+    source = (request.args.get("source") or "all").lower()
+    source_to_code = {"hardware": "A", "scanned": "B", "mock": "C"}
+
+    if source == "all":
+        # Fast path: full wipe via 'clear' SSE (single event, no per-id loop).
+        with _lock:
+            save_users([])
+        broadcast("clear", {})
+        return jsonify({"ok": True})
+
+    if source not in source_to_code:
+        return jsonify({"error": f"unknown source: {source}"}), 400
+
+    target_code = source_to_code[source]
+    removed_ids: list[str] = []
     with _lock:
-        save_users([])
-    broadcast("clear", {})
-    return jsonify({"ok": True})
+        users = load_users()
+        keep = []
+        for u in users:
+            if _entry_source(u) == target_code:
+                removed_ids.append(u["id"])
+            else:
+                keep.append(u)
+        save_users(keep)
+    for rid in removed_ids:
+        broadcast("remove", {"id": rid})
+    return jsonify({"ok": True, "removed": removed_ids, "source": source})
 
 
 @app.route("/admin", methods=["GET", "POST"])

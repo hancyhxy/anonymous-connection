@@ -73,12 +73,24 @@ async function loadData() {
 
 // ----- Tile rendering ---------------------------------------
 
+// Classify a user entry into one of three submission channels. Mirror of
+// _entry_source() in server.py — kept in sync so the same logic decides
+// both per-source clear (server-side) and per-source hide (client-side).
+function classifyTile(user) {
+  if (user.is_mock) return "C";                          // Mock
+  if (user.profile?.sticker !== undefined && user.profile?.sticker !== null) return "A"; // Hardware
+  return "B";                                            // Scanned via wall QR
+}
+
 function ensureTile(user) {
   let el = document.getElementById(`tile-${user.id}`);
   if (el) return el;
   el = document.createElement("div");
   el.id = `tile-${user.id}`;
   el.className = "avatar-tile";
+  // Tag the tile with its channel so CSS can hide it per the panel's
+  // show/hide checkboxes. A=hardware, B=scanned, C=mock.
+  el.setAttribute("data-source", classifyTile(user));
 
   const bubble = document.createElement("div");
   bubble.className = "quote-bubble";
@@ -336,6 +348,16 @@ function relayout() {
 
 const DEBUG_PANEL_KEY = "xy_debug_panel_v1";
 
+// Panel state that doesn't belong to LAYOUT: mock count + 3 per-channel
+// visibility flags. The QR modal is its own ephemeral state, not
+// persisted (closing it should always be fresh next visit).
+const MOCK = {
+  count:        25,
+  showHardware: true,
+  showScanned:  true,
+  showMock:     true,
+};
+
 function loadPanelState() {
   try {
     const raw = localStorage.getItem(DEBUG_PANEL_KEY);
@@ -344,36 +366,142 @@ function loadPanelState() {
     for (const k of Object.keys(LAYOUT_DEFAULTS)) {
       if (typeof saved[k] === "number") LAYOUT[k] = saved[k];
     }
+    // Mock-section restore. Each key is optional so older saves still work.
+    if (typeof saved._mockCount    === "number")  MOCK.count        = saved._mockCount;
+    if (typeof saved._showHardware === "boolean") MOCK.showHardware = saved._showHardware;
+    if (typeof saved._showScanned  === "boolean") MOCK.showScanned  = saved._showScanned;
+    if (typeof saved._showMock     === "boolean") MOCK.showMock     = saved._showMock;
     // Optional collapsed flag
     if (saved._collapsed) {
       document.getElementById("debug-panel")?.classList.add("collapsed");
     }
-    // Restore the QR-overlay show/hide state from the previous session.
-    // Default = hidden (panel toggle off); only flip if explicitly saved on.
-    if (saved._showQR === true) setQROverlay(true);
   } catch (_) {}
 }
 
 function savePanelState() {
   try {
     const collapsed = document.getElementById("debug-panel")?.classList.contains("collapsed");
-    const showQR   = !document.getElementById("qr-overlay")?.hidden;
     localStorage.setItem(DEBUG_PANEL_KEY, JSON.stringify({
       ...LAYOUT,
-      _collapsed: !!collapsed,
-      _showQR:    !!showQR,
+      _collapsed:     !!collapsed,
+      _mockCount:     MOCK.count,
+      _showHardware:  MOCK.showHardware,
+      _showScanned:   MOCK.showScanned,
+      _showMock:      MOCK.showMock,
     }));
   } catch (_) {}
 }
 
-// Show/hide the join-QR overlay AND keep the panel toggle in sync.
-// Single function so any caller (toggle handler, loadPanelState restore,
-// future keyboard shortcut) routes through one place.
+// Apply per-channel visibility to <body> via CSS classes. Single
+// chokepoint so toggle handlers and the initial restore-from-localStorage
+// path both route through one function.
+function applyChannelFilters() {
+  document.body.classList.toggle("hide-hardware", !MOCK.showHardware);
+  document.body.classList.toggle("hide-scanned",  !MOCK.showScanned);
+  document.body.classList.toggle("hide-mock",     !MOCK.showMock);
+}
+
+// Show/hide the join-QR modal. Pure DOM toggle — no persistence.
 function setQROverlay(visible) {
   const overlay = document.getElementById("qr-overlay");
-  const toggle  = document.getElementById("t-showQR");
-  if (overlay) overlay.hidden = !visible;
-  if (toggle)  toggle.checked = !!visible;
+  if (overlay) overlay.toggleAttribute("hidden", !visible);
+}
+
+// ----- Mock-seed (in-page, no shell script needed) ---------------
+//
+// POSTs N synthetic profiles to /submit so they take the exact same
+// path real submissions take (validation, SSE broadcast, etc.). Each
+// is flagged is_mock=true so the wall can later filter them out.
+// Sticker numbers are NEVER attached — synthetic data is wall-only
+// and must not overlay STAGE3_USERS[1..5] (those slots belong to the
+// physical boards).
+
+const MOCK_PRIMARIES = [
+  "music", "film", "sport", "art", "tech", "food",
+  "gaming", "travel", "books", "photo", "dance", "pets",
+];
+const MOCK_SUBTAGS = {
+  music:  ["jazz","classical","pop","electronic","rock","hip-hop","lo-fi","indie"],
+  film:   ["sci-fi","drama","comedy","documentary","horror","animation","art-house","action"],
+  sport:  ["running","yoga","cycling","swimming","climbing","team-sport","martial-arts","skating"],
+  art:    ["painting","sculpture","digital","illustration","street-art","ceramics","design","collage"],
+  tech:   ["coding","ai","hardware","gaming-tech","web","robotics","data","open-source"],
+  food:   ["cooking","baking","asian","italian","vegan","street-food","coffee","desserts"],
+  gaming: ["rpg","fps","indie-games","puzzle","strategy","co-op","retro","mobile"],
+  travel: ["solo","city","nature","road-trip","backpacking","food-tour","festival","remote"],
+  books:  ["fiction","nonfiction","poetry","sci-fi","mystery","philosophy","manga","essays"],
+  photo:  ["portrait","street","landscape","film-photo","macro","night","phone","documentary"],
+  dance:  ["ballet","hip-hop","contemporary","salsa","swing","k-pop","club","freestyle"],
+  pets:   ["dogs","cats","birds","fish","reptiles","rabbits","exotic","farm-animals"],
+};
+const MOCK_QUOTES = [
+  "need coffee","say hi","want quiet","open to chat",
+  "new here","tired","daydreaming","same vibe?",
+  "running late","warm hands","low battery","loud thoughts",
+];
+const MOCK_NICKS = [
+  "ik","mei","ren","jo","kai","lin","ari","sam","tay","rio","ona","elf",
+  "moss","wren","pip","halo","neon","echo","june","syd","noor","rae","bo","ivy","zev",
+];
+
+function pick(arr)       { return arr[Math.floor(Math.random() * arr.length)]; }
+function pickN(arr, n)   {
+  // sample n unique entries without replacement
+  const copy = arr.slice();
+  const out = [];
+  for (let i = 0; i < n && copy.length; i++) {
+    const idx = Math.floor(Math.random() * copy.length);
+    out.push(copy.splice(idx, 1)[0]);
+  }
+  return out;
+}
+
+function randomMockProfile() {
+  const nP = 1 + Math.floor(Math.random() * 3);   // 1..3 primaries
+  const primaries = pickN(MOCK_PRIMARIES, nP);
+  const interest_details = {};
+  for (const p of primaries) {
+    const nSub = Math.floor(Math.random() * 3);   // 0..2 sub-tags per primary
+    if (nSub > 0) interest_details[p] = pickN(MOCK_SUBTAGS[p], nSub);
+    else          interest_details[p] = [];
+  }
+  return {
+    sex:              pick(["male", "female"]),
+    color:            Math.floor(Math.random() * 5),    // 0..4
+    num:              Math.floor(Math.random() * 3),    // 0..2
+    smile:            false,
+    mood:             Math.floor(Math.random() * 5),    // 0..4
+    bg_level:         Math.floor(Math.random() * 6),    // 0..5
+    quote:            pick(MOCK_QUOTES),
+    nickname:         pick(MOCK_NICKS),
+    interests:        primaries,
+    interest_details,
+    is_mock:          true,
+  };
+}
+
+async function seedMockProfiles(n) {
+  const count = Math.max(1, Math.min(100, n | 0));
+  const button = document.getElementById("debug-seed-mock");
+  const original = button ? button.textContent : null;
+  if (button) { button.disabled = true; button.textContent = `seeding 0/${count}…`; }
+  let ok = 0;
+  for (let i = 1; i <= count; i++) {
+    try {
+      const res = await fetch("/submit", {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify(randomMockProfile()),
+      });
+      if (res.ok) ok++;
+    } catch (_) { /* ignore individual failures */ }
+    if (button) button.textContent = `seeding ${i}/${count}…`;
+  }
+  if (button) {
+    button.disabled = false;
+    button.textContent = original ?? "seed mock";
+  }
+  console.log(`[mock] seeded ${ok}/${count}`);
 }
 
 function refreshPanelDisplay() {
@@ -416,38 +544,6 @@ function wireDebugPanel() {
     savePanelState();
   });
 
-  // Join-QR toggle. Single source of truth: setQROverlay() writes both
-  // the overlay's hidden attr and the checkbox's checked state.
-  document.getElementById("t-showQR")?.addEventListener("change", (e) => {
-    setQROverlay(e.target.checked);
-    savePanelState();
-  });
-
-  // Three independent ways to dismiss the QR overlay, so a stuck
-  // panel state can never trap the user with the overlay open:
-  //   1. × button inside the card (top-right corner)
-  //   2. clicking the dim backdrop (anywhere outside the white card)
-  //   3. ESC key
-  const closeQR = () => { setQROverlay(false); savePanelState(); };
-  // (1) × button — explicit because it lives INSIDE the card and would
-  // otherwise be swallowed by the "click outside card" check below.
-  document.getElementById("qr-close")?.addEventListener("click", (e) => {
-    e.stopPropagation();    // don't double-fire via the overlay handler
-    closeQR();
-  });
-  // (2) backdrop click — close unless the click landed on the white card.
-  document.getElementById("qr-overlay")?.addEventListener("click", (e) => {
-    const card = document.querySelector(".qr-card-large");
-    if (card && card.contains(e.target)) return;
-    closeQR();
-  });
-  // (3) ESC.
-  document.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape") return;
-    const overlay = document.getElementById("qr-overlay");
-    if (overlay && !overlay.hidden) closeQR();
-  });
-
   // Server-side wipe. POST /admin/clear is localhost-only on the backend,
   // so this works from the wall machine but not from any phone on the
   // LAN — exactly what we want during a multi-person test session.
@@ -465,6 +561,94 @@ function wireDebugPanel() {
       alert(`clear failed: ${err.message}`);
     }
   });
+
+  // ----- Mock section wires --------------------------------------
+
+  // Per-channel show/hide checkboxes. Three peers: hardware (A) /
+  // scanned (B) / mock (C). Each toggle flips a body class; CSS does
+  // the actual hiding via `body.hide-X .avatar-tile[data-source=Y]`.
+  const wireChannelCb = (id, key) => {
+    const cb = document.getElementById(id);
+    if (!cb) return;
+    cb.checked = MOCK[key];
+    cb.addEventListener("change", () => {
+      MOCK[key] = cb.checked;
+      applyChannelFilters();
+      savePanelState();
+    });
+  };
+  wireChannelCb("t-showHardware", "showHardware");
+  wireChannelCb("t-showScanned",  "showScanned");
+  wireChannelCb("t-showMock",     "showMock");
+
+  // Per-channel clear buttons — wipe one source, leave others intact.
+  // POST /admin/clear?source=X. SSE 'remove' events come back and the
+  // UI drops those tiles via the existing handler.
+  const wireChannelClear = (id, source, predicate) => {
+    document.getElementById(id)?.addEventListener("click", async () => {
+      const n = users.filter(predicate).length;
+      if (n === 0) return;
+      if (!confirm(`clear ${n} ${source} tile(s)?`)) return;
+      try {
+        const res = await fetch(`/admin/clear?source=${source}`, { method: "POST" });
+        if (!res.ok) throw new Error(`server ${res.status}`);
+      } catch (err) {
+        alert(`clear ${source} failed: ${err.message}`);
+      }
+    });
+  };
+  wireChannelClear("debug-clear-hardware", "hardware",
+    u => !u.is_mock && u.profile?.sticker !== undefined && u.profile?.sticker !== null);
+  wireChannelClear("debug-clear-scanned", "scanned",
+    u => !u.is_mock && (u.profile?.sticker === undefined || u.profile?.sticker === null));
+  wireChannelClear("debug-clear-mock", "mock",
+    u => !!u.is_mock);
+
+  // Mock count input — persist on each edit so the next page load
+  // remembers the demoer's preferred crowd size.
+  const mockCountInput = document.getElementById("t-mockCount");
+  if (mockCountInput) {
+    mockCountInput.value = String(MOCK.count);
+    mockCountInput.addEventListener("input", () => {
+      const n = parseInt(mockCountInput.value, 10);
+      if (Number.isFinite(n)) MOCK.count = Math.max(1, Math.min(100, n));
+      savePanelState();
+    });
+  }
+
+  // Seed-mock button — POSTs N synthetic profiles. SSE 'user' events
+  // come back through the existing broadcast path so the wall fills
+  // up tile-by-tile rather than all at once (visible "loading" feel).
+  document.getElementById("debug-seed-mock")?.addEventListener("click", () => {
+    seedMockProfiles(MOCK.count);
+  });
+
+  // Show-QR button — opens the center-screen QR modal. Three dismiss
+  // paths (× button, backdrop click, ESC key) wired below so a stuck
+  // operator can always close the overlay.
+  document.getElementById("debug-show-qr")?.addEventListener("click", () => {
+    setQROverlay(true);
+  });
+  document.getElementById("qr-close")?.addEventListener("click", (e) => {
+    e.stopPropagation();
+    setQROverlay(false);
+  });
+  document.getElementById("qr-overlay")?.addEventListener("click", (e) => {
+    // close only when the click landed on the backdrop, not the card itself
+    const card = document.querySelector(".qr-card-large");
+    if (card && card.contains(e.target)) return;
+    setQROverlay(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Escape") return;
+    const overlay = document.getElementById("qr-overlay");
+    if (overlay && !overlay.hidden) setQROverlay(false);
+  });
+
+  // Apply initial channel-filter state from restored panel state. Has to
+  // come after the checkboxes have been wired so their .checked attribute
+  // is in sync with MOCK.* on first paint.
+  applyChannelFilters();
 
   // Header click toggles collapsed state.
   panel.querySelector(".debug-header")?.addEventListener("click", (e) => {
@@ -566,6 +750,15 @@ window.addEventListener("resize", () => {
 
 async function main() {
   try {
+    // Show the mock-mode QR card if the URL says ?mock=1. Two wall modes
+    // share one HTML file: real demo (no QR; physical-board paper QRs
+    // own the entry) vs mock demo (wall QR visible for the tutor to
+    // scan without overlaying any sticker 1..5 slot). Bare URL = wall-
+    // only profile, intentionally.
+    if (new URLSearchParams(location.search).get("mock") === "1") {
+      document.getElementById("mock-qr-card")?.removeAttribute("hidden");
+    }
+
     // Restore previously-tweaked LAYOUT values BEFORE first relayout, so
     // the wall opens with the user's last-known good settings.
     loadPanelState();
