@@ -125,6 +125,28 @@ uint32_t nfcLastTapMs = 0;
 bool     nfcReady     = false;
 
 
+// ---- Manual-advance button (right-side IO16) -------------------------------
+// 3-pin button module (S / blank / −): S → IO16, − → GND, middle pin unused.
+// Module has no built-in pull-up, so we enable the ESP32 internal pull-up;
+// reading LOW = pressed. Used to manually advance the match animation through
+// its three STATIC phases (number → common tags → hint) instead of timer-driven.
+//
+// IMPORTANT — pin choice: GPIO 12/13 on ESP32-C6 are USB D-/D+, NOT free GPIOs.
+// Using IO12 here will silently break the USB CDC interface the moment
+// pinMode(12, INPUT_PULLUP) runs in setup(), making the device disappear from
+// /dev/cu.usbmodem* and breaking all subsequent uploads. hardware.md §3.2's
+// claim "IO12 适合按钮" is wrong on this chip. IO16/17/20/23 are the real
+// safe digital IOs on the right-side header.
+#define BTN_PIN           16
+// 50 ms debounce comfortably absorbs mechanical contact bounce while staying
+// imperceptible to the user (a deliberate finger press is >100 ms).
+#define BTN_DEBOUNCE_MS   50
+
+uint8_t  btnLastStable   = HIGH;   // last stable reading after debounce
+uint8_t  btnLastReading  = HIGH;   // most recent raw reading (may be bouncing)
+uint32_t btnLastChangeMs = 0;      // millis() when btnLastReading last flipped
+
+
 // ---- Sprite layout ---------------------------------------------------------
 // Layout: top quote bubble (single line) → sprite → bottom interest tag row.
 // Mirrors the web preview composition (quote above, avatar middle, tags below).
@@ -1101,11 +1123,10 @@ void tickMatchAnimation() {
     }
 
     case MATCH_NUMBER_STATIC: {
-      // Hold for 1.5 s, then transition into the COMMON phase. Used to be
-      // 3 s before the COMMON phase existed; halved to keep total animation
-      // length tolerable now that we have an extra screen between number
-      // and hint.
-      if (now - matchPhaseStartMs >= 1500) {
+      // Hold until the user presses the manual-advance button (was 1.5s timer).
+      // The match score is the first "decision point" — observer reads the
+      // number at their own pace, then taps to acknowledge.
+      if (buttonPressedEdge()) {
         // Clear the screen so the COMMON caption + tags paint cleanly over
         // the same bg. Without this fillScreen, the 33% number stays behind.
         gfx->fillScreen(matchBg565);
@@ -1130,9 +1151,11 @@ void tickMatchAnimation() {
     }
 
     case MATCH_COMMON_STATIC: {
-      // 2.5 s read time. Already painted in fully-saturated fg by the
-      // FADING_IN tail; nothing to do until the timer expires.
-      if (now - matchPhaseStartMs >= 2500) {
+      // Hold until the user presses the manual-advance button (was 2.5s timer).
+      // The "you both like X" screen is the second decision point — observer
+      // takes in the shared interests, then taps to see the icebreaker hint.
+      // Caption + tags already painted in fully-saturated fg by FADING_IN tail.
+      if (buttonPressedEdge()) {
         matchState = MATCH_COMMON_FADING_OUT;
         matchPhaseStartMs = now;
       }
@@ -1189,7 +1212,10 @@ void tickMatchAnimation() {
     }
 
     case MATCH_HINT_STATIC: {
-      if (now - matchPhaseStartMs >= 5000) {
+      // Hold until the user presses the manual-advance button (was 5s timer).
+      // The hint is the third decision point — observer reads the icebreaker
+      // question, then taps to dismiss the match screen and return to avatar.
+      if (buttonPressedEdge()) {
         matchState = MATCH_IDLE;
         outerDirty = true;   // re-arm avatar repaint
       }
@@ -1447,6 +1473,41 @@ void sendTap(const char* peerUid) {
 }
 
 
+// ---- Manual-advance button --------------------------------------------------
+// Returns true exactly once per press (on the HIGH → LOW edge). Caller polls
+// this every loop iteration; we update the debounce state in-place and only
+// "consume" a press at the moment of a stable transition.
+//
+// State machine:
+//   reading flips → record + reset debounce timer → no event yet
+//   reading stays same for ≥ BTN_DEBOUNCE_MS → that becomes the new stable
+//     state → fire event iff this transition was HIGH→LOW (active-low press)
+//
+// Holding the button down only fires once: after the initial HIGH→LOW
+// transition, the stable level stays LOW until the user releases, so the
+// "reading != btnLastStable" condition stays false until release+repress.
+bool buttonPressedEdge() {
+  uint8_t reading = digitalRead(BTN_PIN);
+  uint32_t now = millis();
+
+  if (reading != btnLastReading) {
+    // Raw reading changed — could be a real press or a bounce. Reset timer.
+    btnLastReading = reading;
+    btnLastChangeMs = now;
+    return false;
+  }
+
+  // Reading has been stable for ≥ debounce window. If this stable reading
+  // differs from our last confirmed stable level, treat it as a confirmed
+  // transition.
+  if (now - btnLastChangeMs < BTN_DEBOUNCE_MS) return false;
+  if (reading == btnLastStable) return false;
+
+  btnLastStable = reading;
+  return (reading == LOW);   // press = HIGH → LOW (pull-up + button-to-GND)
+}
+
+
 // ---- NFC polling -----------------------------------------------------------
 // Read one tap per call (or fast-return if cooling down / animation playing /
 // no card in field). On success, emit a JSON line on Serial — device.js's
@@ -1502,6 +1563,10 @@ void setup() {
 
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, HIGH);
+
+  // Manual-advance button — internal pull-up; the 3-pin module's S pin
+  // connects directly to GND when pressed, no external resistor needed.
+  pinMode(BTN_PIN, INPUT_PULLUP);
 
   if (!gfx->begin()) {
     Serial.println("[serial_avatar] gfx->begin() FAILED");
