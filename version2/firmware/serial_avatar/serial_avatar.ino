@@ -25,9 +25,29 @@
 #include <ArduinoJson.h>
 #include <Wire.h>
 #include <Adafruit_PN532.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+// Use ESP-IDF's bundled QR encoder (espressif__qrcode), exposed by the
+// Arduino-ESP32 core. No external library install needed — and crucially,
+// no conflict with a same-name third-party library. The API is callback-
+// driven: we hand it a display function it will invoke once encoding is
+// done, and inside that callback we paint modules to the LCD.
+#include "qrcode.h"
 
 #include "sprites.h"
 #include "glyphs.h"
+#include "secrets.h"     // WIFI_SSID, WIFI_PASS, SERVER_HOST, SERVER_PORT, ME_STICKER
+
+// Poll interval for /api/device/poll. 500 ms is the trade-off between
+// responsiveness (a fresh phone-submitted avatar appears within ~half a
+// second) and CPU/Wi-Fi load (~2 req/s with a tiny JSON body each is
+// negligible for ESP32 + Flask). Match events arrive on the same poll
+// channel — so this also caps animation-start latency at 500 ms past
+// the tap, which feels instant in practice.
+#define POLL_INTERVAL_MS  500
+// Wi-Fi join timeout in setup(). After this we proceed and show an error
+// on screen so the demo isn't bricked by a temporarily-flaky hotspot.
+#define WIFI_JOIN_TIMEOUT_MS  15000
 
 
 // ---- Types -----------------------------------------------------------------
@@ -142,6 +162,18 @@ bool     nfcReady     = false;
 
 // Animation cadence — matches Web ANIM_INTERVAL_MS.
 #define ANIM_INTERVAL_MS 166
+
+
+// ---- Wi-Fi + HTTP poll state -----------------------------------------------
+// Wi-Fi connection state lives here so renderWaiting() can show diagnostics
+// before any data arrives. pollLastMs gates /api/device/poll cadence to
+// POLL_INTERVAL_MS regardless of how fast loop() spins.
+bool     wifiReady    = false;
+uint32_t pollLastMs   = 0;
+// True once /api/device/hello has succeeded at least once. We don't poll
+// until the server has acknowledged this sticker — otherwise our first
+// poll would 404 and burn time on retry storms.
+bool     helloDone    = false;
 
 
 // ---- Palette (mirror of web/colors.json palette[mood][energy]) -------------
@@ -477,25 +509,102 @@ size_t countCells(const char* s) {
   return cells;
 }
 
+// Build the URL the QR points at: stage 1 form on the server, with the
+// sticker query param baked in so app.js's applyUrlSticker() auto-locks
+// the sticker dropdown. Caller passes the buffer to avoid heap churn.
+void buildScanUrl(char* out, size_t cap) {
+  snprintf(out, cap,
+           "http://%s:%d/?sticker=%d",
+           SERVER_HOST, SERVER_PORT, ME_STICKER);
+}
+
+// ESP-IDF's qrcode API is callback-driven: esp_qrcode_generate() encodes the
+// string and then invokes our display_func once with a handle. We can't pass
+// the LCD origin/scale through the callback's fixed signature, so we stash
+// them in this file-local config struct. Single-shot: write before the call,
+// read inside the callback, no concurrent rendering so no lock needed.
+struct {
+  int origin_x;
+  int origin_y;
+  int module_px;
+} qrPaintCfg;
+
+static void qrPaintCallback(esp_qrcode_handle_t qrcode) {
+  int n = esp_qrcode_get_size(qrcode);
+  int M = qrPaintCfg.module_px;
+  // White quiet zone (~1.3 module border) — iPhones scan way faster with it.
+  int padding = 8;
+  int total   = n * M;
+  gfx->fillRect(qrPaintCfg.origin_x - padding,
+                qrPaintCfg.origin_y - padding,
+                total + padding * 2,
+                total + padding * 2,
+                0xFFFF);
+  for (int y = 0; y < n; y++) {
+    for (int x = 0; x < n; x++) {
+      if (esp_qrcode_get_module(qrcode, x, y)) {
+        gfx->fillRect(qrPaintCfg.origin_x + x * M,
+                      qrPaintCfg.origin_y + y * M,
+                      M, M, 0x0000);
+      }
+    }
+    drainSerialIntoBuf();
+  }
+}
+
+// Draw a QR code module-by-module via fillRect. max_qrcode_version=4 supports
+// URLs up to ~62 chars at ECC LOW — plenty for "http://192.168.x.x:8000/?sticker=1".
+// At 6 px/module a v4 (33 modules) QR is 198×198 px; v3 (29) is 174×174.
+// We let the encoder pick the smallest version that fits, anchored near the
+// top so a status line fits below in renderWaiting().
+void drawScanQr() {
+  char url[128];
+  buildScanUrl(url, sizeof(url));
+
+  qrPaintCfg.module_px = 6;
+  // Pre-compute origin assuming v4 size (worst case); when v3 fits we get a
+  // smaller QR drawn at the same origin, leaving slightly more empty space
+  // around it — visually fine. 18 px from top leaves room for status text
+  // at the bottom (y≈210).
+  qrPaintCfg.origin_x = (LCD_W - 33 * 6) / 2;      // 21
+  qrPaintCfg.origin_y = 18;
+
+  esp_qrcode_config_t cfg = ESP_QRCODE_CONFIG_DEFAULT();
+  cfg.display_func       = qrPaintCallback;
+  cfg.max_qrcode_version = 4;
+  cfg.qrcode_ecc_level   = ESP_QRCODE_ECC_LOW;
+
+  esp_err_t err = esp_qrcode_generate(&cfg, url);
+  if (err != ESP_OK) {
+    drawString(20, 100, "qr encode failed", 0xF800, RGB565_BLACK);
+    Serial.printf("[serial_avatar] qr encode err %d for url %s\n", err, url);
+  }
+}
+
 void renderWaiting() {
-  // Same FIFO-overflow trap renderFull() defends against: each gfx call here
-  // is synchronous SPI that blocks ~tens of ms. Without intermediate drains,
-  // a host frame arriving mid-render (e.g. animation just ended, st.valid is
-  // still false → caller falls into this branch, and the next NFC tap's match
-  // packet lands on the wire while we're filling the screen) overflows the
-  // ~256 B USB-CDC RX FIFO and silently loses the '\n' that closes the JSON.
+  // Background black for high contrast around the QR's white quiet zone.
   gfx->fillScreen(RGB565_BLACK);
   drainSerialIntoBuf();
-  // Mid-gray (~RGB 64,64,64) instead of white. The waiting screen is what
-  // the LCD shows on every boot (sometimes for tens of seconds) before an
-  // avatar packet arrives, and pure white on black at that exposure pattern
-  // produces visible image persistence (faint "waiting for connection"
-  // ghost lingering across all later screens). Lower contrast → no burn-in
-  // training; still readable for the brief moment it's actually shown.
-  const uint16_t WAITING_FG = 0x4208;
-  drawString(30, 96,  "waiting for",    WAITING_FG, RGB565_BLACK);
-  drainSerialIntoBuf();
-  drawString(30, 120, "web connect...", WAITING_FG, RGB565_BLACK);
+
+  const uint16_t FG = 0xFFFF;
+  if (!wifiReady) {
+    // Wi-Fi not connected yet — show that instead of a QR (a QR pointing
+    // at the laptop is useless if the device can't reach the laptop).
+    drawString(20, 100, "connecting wifi...", FG, RGB565_BLACK);
+    drainSerialIntoBuf();
+    drawString(20, 124, WIFI_SSID,            FG, RGB565_BLACK);
+    drainSerialIntoBuf();
+    return;
+  }
+
+  drawScanQr();
+
+  // Status line under the QR: "scan to set up · sticker N".
+  char status[40];
+  snprintf(status, sizeof(status), "scan to set up #%d", ME_STICKER);
+  // Center-ish — drawString is left-anchored. 30 px left margin works
+  // for the ~20 char strings we use here.
+  drawString(30, 210, status, FG, RGB565_BLACK);
   drainSerialIntoBuf();
 }
 
@@ -1161,6 +1270,183 @@ void handleLine(const String &line) {
 }
 
 
+// ---- Wi-Fi + HTTP poll -----------------------------------------------------
+// Best-effort Wi-Fi connect with a timeout. We don't block forever — failure
+// just means renderWaiting keeps saying "connecting wifi..." and the user
+// can power-cycle. Returns true on success.
+bool connectWiFi() {
+  Serial.printf("[serial_avatar] wifi: joining %s\n", WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  uint32_t start = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    if (millis() - start > WIFI_JOIN_TIMEOUT_MS) {
+      Serial.println("[serial_avatar] wifi: join timeout");
+      return false;
+    }
+    delay(200);
+  }
+  Serial.print("[serial_avatar] wifi: ok, ip=");
+  Serial.println(WiFi.localIP());
+  return true;
+}
+
+// Apply a profile JSON object (as received from /api/device/poll's events
+// array) to the global avatar state. Mirrors the avatar fields handleLine
+// reads, minus the type detection — we know it's a profile because the
+// caller dispatched on event["type"].
+void applyProfileEvent(JsonObject ev) {
+  if (ev["avatar"].is<JsonObject>()) {
+    JsonObject a = ev["avatar"].as<JsonObject>();
+    if (a["sex"].is<const char*>())   st.sex    = String((const char*)a["sex"]);
+    if (a["color"].is<int>())         st.color  = a["color"].as<int>();
+    if (a["num"].is<int>())           st.num    = a["num"].as<int>();
+    if (a["smile"].is<bool>())        st.smile  = a["smile"].as<bool>();
+    if (a["mood"].is<int>())          st.mood   = a["mood"].as<int>();
+    if (a["bg_level"].is<int>())      st.energy = a["bg_level"].as<int>();
+  }
+  if (ev["quote"].is<const char*>())  st.quote  = String((const char*)ev["quote"]);
+
+  // interests: server stores ["music","film",...] as strings; firmware's
+  // interest tag row expects {icon,label} objects. We don't have icon
+  // metadata server-side yet, so just count for now — rendering stays empty
+  // until we plumb icons through. Doesn't regress current behavior.
+  st.interest_count = 0;
+
+  st.valid    = true;
+  outerDirty  = true;
+  Serial.printf("[serial_avatar] profile applied: sex=%s color=%d num=%d smile=%d mood=%d energy=%d quote=\"%s\"\n",
+                st.sex.c_str(), st.color, st.num, st.smile, st.mood, st.energy, st.quote.c_str());
+}
+
+// Build a JsonDocument from a poll event and dispatch into handleMatch
+// (which already knows how to read the full match payload — peer_avatar,
+// common_tags, score, hint). We re-serialize then deserialize as a
+// StaticJsonDocument because handleMatch's signature takes a JsonDocument
+// reference; this is ~4 ms and only fires on tap, so cost is fine.
+void dispatchMatchEvent(JsonObject ev) {
+  // Heap-allocated to match the rest of the HTTP path's allocator strategy
+  // (see pollServer comment). 1 KB is comfortable for the match payload —
+  // server-side serialization is ~400 B.
+  DynamicJsonDocument doc(1024);
+  for (JsonPair kv : ev) {
+    doc[kv.key()] = kv.value();
+  }
+  handleMatch(doc);
+}
+
+// One HTTP exchange with the server: GET /api/device/poll?sticker=N.
+// Pulls the events array and dispatches each entry by type. Anything we
+// don't recognize is logged + skipped — server-newer-than-firmware is a
+// real scenario during dev.
+// Single global HTTPClient reused across hello/poll/tap calls. Rebuilding
+// the client every loop iteration was triggering heap fragmentation —
+// `assert failed: block_locate_free heap_tlsf.c:476` — once we'd been
+// running for a few seconds. The TLSF allocator can't find a contiguous
+// block large enough for HTTPClient's internal buffers after repeated
+// alloc/free churn. Reusing a single instance keeps total live heap stable.
+HTTPClient httpClient;
+
+// Heap-friendly JSON buffer for poll responses. Old code used a stack-
+// allocated StaticJsonDocument<8192>; switching to a stream-parsed
+// DynamicJsonDocument with realistic size avoids two issues at once:
+//   - the 8 KB stack frame (loop task only has ~8 KB stack)
+//   - the heap fragmentation from creating it on every iteration
+// One queued match event is ~400 B; server caps at 16 entries; 2 KB
+// covers a few queued events with comfortable headroom.
+#define POLL_JSON_BUDGET 2048
+
+void pollServer() {
+  char url[96];
+  snprintf(url, sizeof(url),
+           "http://%s:%d/api/device/poll?sticker=%d",
+           SERVER_HOST, SERVER_PORT, ME_STICKER);
+  httpClient.begin(url);
+  httpClient.setTimeout(3000);
+  int code = httpClient.GET();
+  if (code != 200) {
+    if (code != HTTPC_ERROR_CONNECTION_REFUSED && code != -1) {
+      // Spam-filter the most common transient errors; log everything else.
+      Serial.printf("[serial_avatar] poll HTTP %d\n", code);
+    }
+    httpClient.end();
+    return;
+  }
+  // Materialize the whole body first, then parse. Streaming directly from
+  // getStream() into deserializeJson() has been observed to wedge when
+  // chunked encoding + heap pressure interact badly. getString() is one
+  // more buffer but it's predictable.
+  String body = httpClient.getString();
+  httpClient.end();
+
+  DynamicJsonDocument doc(POLL_JSON_BUDGET);
+  DeserializationError err = deserializeJson(doc, body);
+  if (err) {
+    Serial.printf("[serial_avatar] poll parse err: %s (body %u B)\n",
+                  err.c_str(), body.length());
+    return;
+  }
+  if (!doc["events"].is<JsonArray>()) return;
+  for (JsonObject ev : doc["events"].as<JsonArray>()) {
+    const char* t = ev["type"] | "";
+    if (strcmp(t, "profile") == 0) {
+      applyProfileEvent(ev);
+    } else if (strcmp(t, "match") == 0) {
+      // Match animation owns the screen; ignore new match while one is
+      // already playing. The cool-down on the NFC side (NFC_DEBOUNCE_MS)
+      // makes this rare but worth defending against.
+      if (matchState == MATCH_IDLE) dispatchMatchEvent(ev);
+    } else {
+      Serial.printf("[serial_avatar] poll: unknown event type \"%s\"\n", t);
+    }
+  }
+}
+
+// POST /api/device/hello {sticker:N}. Idempotent; if it fails we'll keep
+// retrying every POLL_INTERVAL_MS until it succeeds.
+bool sendHello() {
+  char url[96];
+  snprintf(url, sizeof(url),
+           "http://%s:%d/api/device/hello",
+           SERVER_HOST, SERVER_PORT);
+  httpClient.begin(url);
+  httpClient.addHeader("Content-Type", "application/json");
+  httpClient.setTimeout(3000);
+  char body[48];
+  snprintf(body, sizeof(body), "{\"sticker\":%d}", ME_STICKER);
+  int code = httpClient.POST(body);
+  httpClient.end();
+  if (code == 200) {
+    Serial.printf("[serial_avatar] hello ok (sticker=%d)\n", ME_STICKER);
+    return true;
+  }
+  Serial.printf("[serial_avatar] hello failed: HTTP %d\n", code);
+  return false;
+}
+
+// POST /api/device/tap {me_sticker:N, peer_uid:"AA:BB:..."} — fire-and-forget.
+// We don't wait for the match payload here; the server pushes it onto our
+// poll queue and pollServer picks it up on the next tick.
+void sendTap(const char* peerUid) {
+  char url[96];
+  snprintf(url, sizeof(url),
+           "http://%s:%d/api/device/tap",
+           SERVER_HOST, SERVER_PORT);
+  httpClient.begin(url);
+  httpClient.addHeader("Content-Type", "application/json");
+  httpClient.setTimeout(3000);
+  char body[96];
+  snprintf(body, sizeof(body),
+           "{\"me_sticker\":%d,\"peer_uid\":\"%s\"}",
+           ME_STICKER, peerUid);
+  int code = httpClient.POST(body);
+  httpClient.end();
+  if (code != 200) {
+    Serial.printf("[serial_avatar] tap POST failed: HTTP %d\n", code);
+  }
+}
+
+
 // ---- NFC polling -----------------------------------------------------------
 // Read one tap per call (or fast-return if cooling down / animation playing /
 // no card in field). On success, emit a JSON line on Serial — device.js's
@@ -1193,7 +1479,12 @@ void pollNFC() {
                     i == 0 ? "%02X" : ":%02X", uid[i]);
   }
 
-  Serial.printf("{\"type\":\"tap\",\"uid\":\"%s\"}\n", uidStr);
+  // Debug log so Serial Monitor still shows every tap for offline diagnosis.
+  Serial.printf("[serial_avatar] tap uid=%s\n", uidStr);
+  // Real upload — server computes the match and pushes the result onto
+  // BOTH devices' poll queues. We don't block waiting for the reply; the
+  // next pollServer() tick (≤500 ms later) picks up the match event.
+  if (wifiReady) sendTap(uidStr);
 }
 
 
@@ -1217,8 +1508,17 @@ void setup() {
     while (1) delay(1000);
   }
 
-  renderWaiting();
-  Serial.printf("[serial_avatar] ready — %d sprites loaded\n", SPRITES_COUNT);
+  renderWaiting();   // shows "connecting wifi..." until we have an IP
+  Serial.printf("[serial_avatar] ready — %d sprites loaded, sticker=%d\n",
+                SPRITES_COUNT, ME_STICKER);
+
+  // Wi-Fi join — non-fatal: on failure the device still boots, screen
+  // shows the "connecting wifi..." state, and we'll keep trying in loop().
+  wifiReady = connectWiFi();
+  if (wifiReady) {
+    // Repaint the waiting screen now that we have an IP so the QR shows.
+    renderWaiting();
+  }
 
   // NFC bring-up. Failure is non-fatal — the firmware still works as a pure
   // serial-driven avatar (the original stage1/2 code path) so a busted PN532
@@ -1239,10 +1539,52 @@ void setup() {
 }
 
 void loop() {
-  // NFC polling first — internal guards (debounce + animation-busy check)
-  // make this a sub-millisecond no-op when there's nothing to do, so it's
-  // safe to run every loop iteration. A successful poll emits a JSON line
-  // on Serial; the web side (stage3.html) handles routing via /api/tap.
+  // Auto-recover Wi-Fi if it dropped. WL_CONNECTED → ok; anything else
+  // → flag down so renderWaiting tells the user, and try to rejoin every
+  // time we'd normally poll. No more aggressive than that — Wi-Fi
+  // reconnect spam can wedge the radio.
+  if (WiFi.status() != WL_CONNECTED) {
+    if (wifiReady) {
+      // Just dropped.
+      Serial.println("[serial_avatar] wifi dropped");
+      wifiReady = false;
+      helloDone = false;
+      // If we're idle, repaint the waiting screen so the QR doesn't lie
+      // about the connection state. Mid-animation we leave the screen
+      // alone — the user gets a "wifi dropped" status next time we idle.
+      if (matchState == MATCH_IDLE && !st.valid) renderWaiting();
+    }
+  } else if (!wifiReady) {
+    wifiReady = true;
+    Serial.print("[serial_avatar] wifi reconnected, ip=");
+    Serial.println(WiFi.localIP());
+    if (matchState == MATCH_IDLE && !st.valid) renderWaiting();
+  }
+
+  // First-time hello — retried every poll interval until it sticks. Server
+  // creates the per-device slot here; without it /api/device/poll 404s.
+  uint32_t now = millis();
+  if (wifiReady && !helloDone && (now - pollLastMs >= POLL_INTERVAL_MS)) {
+    pollLastMs = now;
+    helloDone = sendHello();
+  }
+
+  // Server poll — drains profile updates and match events. Same cadence
+  // gate as hello, so on a fresh boot we alternate hello/poll/hello/...
+  // until hello succeeds, then settle into pure poll. matchState!=IDLE
+  // skip avoids long HTTP calls clobbering animation timing — server
+  // queues events for us anyway, no events lost.
+  if (wifiReady && helloDone && (now - pollLastMs >= POLL_INTERVAL_MS)
+      && matchState == MATCH_IDLE) {
+    pollLastMs = now;
+    pollServer();
+  }
+
+  // NFC polling — unchanged behavior. Internal guards (debounce +
+  // animation-busy check) make this a sub-millisecond no-op when there's
+  // nothing to do, so it's safe to run every loop iteration. On success
+  // sendTap() POSTs the UID to the server; the resulting match comes back
+  // through the next pollServer() call.
   pollNFC();
 
   // Pick up any frame that finished arriving during a render-time drain.
@@ -1291,7 +1633,9 @@ void loop() {
     renderFull();
   }
 
-  uint32_t now = millis();
+  // Refresh `now` after the potentially-blocking render call above —
+  // `now` was first captured near the top of loop() for poll-cadence gating.
+  now = millis();
 
   // Inner-frame animation
   if (st.valid && (now - lastAnimMs >= ANIM_INTERVAL_MS)) {

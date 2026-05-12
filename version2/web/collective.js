@@ -146,7 +146,7 @@ function paintTileInterests(el, user) {
   const parts = list
     .map(v => _interestByValue.get(v))
     .filter(Boolean)
-    .map(o => `<span class="tile-interest"><span class="tile-interest-icon">${o.icon}</span>${o.label}</span>`);
+    .map(o => `<span class="tile-interest">${o.label}</span>`);
   tags.innerHTML = parts.join('<span class="tile-interest-sep">·</span>');
   tags.removeAttribute("data-empty");
 }

@@ -180,7 +180,7 @@ function populateInterests() {
     return `<button type="button" class="interest-tag${isSelected ? " selected" : ""}"
               role="checkbox" aria-checked="${isSelected}"
               data-value="${opt.value}">
-              <span class="interest-icon">${opt.icon}</span><span class="interest-label">${opt.label}</span>
+              <span class="interest-label">${opt.label}</span>
             </button>`;
   }).join("");
 }
@@ -359,7 +359,8 @@ function updateHeartRateReadout() {
 
 // Rebuild the preview's interest row from state.interests.
 // Called after any selection change in wireInterests, and once on boot.
-// Format: "♪ music · ▶ film · ☕ food" — hidden when empty.
+// Format: "music · film · food" — hidden when empty. Label-only to
+// match the hardware (E-Ink + LCD) renderer, which prints text only.
 function renderPreviewInterests() {
   const row = document.getElementById("preview-interests");
   if (!row) return;
@@ -372,7 +373,7 @@ function renderPreviewInterests() {
   const parts = state.interests
     .map(v => byValue.get(v))
     .filter(Boolean)
-    .map(o => `<span class="preview-interest"><span class="preview-interest-icon">${o.icon}</span>${o.label}</span>`);
+    .map(o => `<span class="preview-interest">${o.label}</span>`);
   row.innerHTML = parts.join('<span class="preview-interest-sep">·</span>');
   row.classList.add("visible");
 }
@@ -462,7 +463,7 @@ function renderInterestSubtags() {
            + `aria-pressed="${picked.includes(sub) ? "true" : "false"}">${sub}</button>`;
     }).join("");
     return `<div class="subtag-group">
-              <div class="subtag-group-label"><span class="subtag-icon">${opt.icon}</span>${opt.label}</div>
+              <div class="subtag-group-label">${opt.label}</div>
               <div class="subtag-pills">${pills}</div>
             </div>`;
   }).join("");

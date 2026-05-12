@@ -85,6 +85,24 @@
         <div class="hr-readout" id="hr-readout">♥ — no signal</div>
       </fieldset>
 
+      <!-- Q_QUOTE: free text. Reads as appearance — it's the speech-bubble
+           floating above the avatar, so it groups with the look-and-feel
+           controls above rather than the match-score controls below. -->
+      <fieldset class="qblock" data-q="Q_QUOTE">
+        <legend>what are you thinking?</legend>
+        <input type="text" id="input-quote" maxlength="14"
+               placeholder="14 chars, ASCII only"
+               autocomplete="off">
+        <div class="suggestions" id="quote-suggestions">
+          <!-- populated by app.js -->
+        </div>
+      </fieldset>
+
+      <!-- ─── Interest Match ─────────────────────────────────────
+           Below this line: controls that feed Match Score, not the
+           visual avatar. Two-tier tag picker (primary + subtag).
+           ─────────────────────────────────────────────────────── -->
+
       <!-- Q_INTERESTS: multi-select tag picker, max 3 -->
       <fieldset class="qblock" data-q="Q_INTERESTS">
         <legend>pick up to 3 interests</legend>
@@ -102,17 +120,6 @@
         <legend>get more specific (optional)</legend>
         <div id="opts-subtags">
           <!-- populated by app.js as primaries are chosen -->
-        </div>
-      </fieldset>
-
-      <!-- Q_QUOTE: free text -->
-      <fieldset class="qblock" data-q="Q_QUOTE">
-        <legend>what are you thinking?</legend>
-        <input type="text" id="input-quote" maxlength="14"
-               placeholder="14 chars, ASCII only"
-               autocomplete="off">
-        <div class="suggestions" id="quote-suggestions">
-          <!-- populated by app.js -->
         </div>
       </fieldset>
 

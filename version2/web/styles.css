@@ -178,20 +178,6 @@ html, body {
   color: var(--text-primary);
 }
 
-.interest-icon {
-  font-size: 0.95rem;
-  line-height: 1;
-  opacity: 0.9;
-  /* Force text-style rendering — some single-color Unicode symbols
-     (e.g. ⚽ ☕ ✈ ❤ ✏) get auto-upgraded to color emoji on macOS/iOS.
-     We want a consistent single-color look matching the ASCII sprite. */
-  font-variant-emoji: text;
-}
-
-.interest-tag.selected .interest-icon {
-  opacity: 1;
-}
-
 .interest-hint {
   margin-top: 10px;
   font-size: 0.8rem;
@@ -227,10 +213,6 @@ html, body {
   align-items: center;
   gap: 6px;
   letter-spacing: 0.04em;
-}
-.subtag-icon {
-  font-variant-emoji: text;
-  opacity: 0.85;
 }
 .subtag-pills {
   display: flex;
@@ -323,13 +305,6 @@ html, body {
   align-items: center;
   gap: 4px;
   white-space: nowrap;
-}
-
-.preview-interest-icon {
-  font-size: 1.1rem;
-  line-height: 1;
-  opacity: 0.9;
-  font-variant-emoji: text;
 }
 
 .preview-interest-sep {

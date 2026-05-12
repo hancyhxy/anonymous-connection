@@ -182,6 +182,48 @@ def stage3_broadcast(event: str, payload: dict) -> None:
             try: q.put_nowait(msg)
             except Exception: pass
 
+
+# ---------------------------------------------------------------------------
+# Device side (new) — per-station polling state.
+#
+# Each ESP32 station identifies itself by ME_STICKER (1..5). On boot it hits
+# /api/device/hello which creates a slot; afterwards it polls /api/device/poll
+# every ~500 ms. The slot holds:
+#   - the latest profile (mirrored from STAGE3_USERS[uid] after /submit),
+#     so a fresh device picks up the existing avatar without waiting for the
+#     next submit.
+#   - a small event deque the device drains each poll (profile updates and
+#     match events get appended here; device renders them in order).
+#
+# Why polling and not SSE: ESP32 has no native EventSource; a 500 ms poll
+# is simpler, survives Wi-Fi flakes for free, and matches the cadence the
+# match animation needs anyway (~1 s scoring loop, not real-time).
+# ---------------------------------------------------------------------------
+_devices: dict[int, dict] = {}   # sticker_num -> {"events": list, "last_seen": ts}
+_devices_lock = threading.Lock()
+
+def _device_slot(sticker_num: int) -> dict:
+    """Get-or-create the slot for sticker_num. Must hold _devices_lock."""
+    slot = _devices.get(sticker_num)
+    if slot is None:
+        slot = {"events": [], "last_seen": 0.0}
+        _devices[sticker_num] = slot
+    return slot
+
+def device_push(sticker_num: int, event: dict) -> None:
+    """Append an event for one device's next poll. No-op if the device has
+    never said hello (we don't want to accumulate events for a station that
+    isn't online — they'd flood on first boot)."""
+    with _devices_lock:
+        slot = _devices.get(sticker_num)
+        if slot is None:
+            return
+        # Cap the queue. Match events are big; if the device is offline for
+        # a long time we'd rather drop old ones than balloon RAM.
+        slot["events"].append(event)
+        if len(slot["events"]) > 16:
+            slot["events"] = slot["events"][-16:]
+
 def compute_match(me_uid: str, peer_uid: str) -> dict | None:
     """Return a match payload for the (me, peer) UID pair, or None if either
     UID is unknown. Score is common_count / 3 → 0/33/66/99 — score is
@@ -294,6 +336,17 @@ def submit():
             "interest_details": profile.get("interest_details", {}),
             "quote":            profile.get("quote", ""),
         }
+        # If the ESP32 for this sticker is online, hand it the freshly-DIY'd
+        # profile so it can flip from WAITING_PROFILE to SHOWING_PROFILE on
+        # its next poll. device_push is a no-op when no device has said
+        # hello — safe to call unconditionally.
+        device_push(int(sticker_num), {
+            "type":   "profile",
+            "avatar": STAGE3_USERS[uid]["avatar"],
+            "quote":  STAGE3_USERS[uid]["quote"],
+            "interests":        STAGE3_USERS[uid]["interests"],
+            "interest_details": STAGE3_USERS[uid]["interest_details"],
+        })
 
     entry = {
         "id":      f"u_{uuid.uuid4().hex[:8]}",
@@ -378,6 +431,92 @@ def api_tap():
                         "me_uid": me_uid, "peer_uid": peer_uid}), 404
     stage3_broadcast("match", match)
     return jsonify({"ok": True, "match": match})
+
+@app.route("/api/device/hello", methods=["POST"])
+def api_device_hello():
+    """ESP32 → server: 'I am sticker N, I'm online.' Idempotent — calling
+    again on a reboot is fine, it just bumps last_seen and clears any
+    stale events queued before the reboot (those would be replayed onto
+    a freshly-rendered waiting screen, which would feel like a ghost)."""
+    body = request.get_json(silent=True) or {}
+    try:
+        sticker = int(body.get("sticker"))
+        if sticker < 1 or sticker > 5:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "sticker must be int 1..5"}), 400
+    with _devices_lock:
+        slot = _device_slot(sticker)
+        slot["events"] = []     # fresh boot — drop anything queued
+        slot["last_seen"] = time.time()
+    # Demo narrative requires Act 1 to show a QR code — i.e., the screen
+    # MUST stay on the waiting/QR view until a phone scans + submits.
+    # Previously this route seeded a profile event from STAGE3_USERS so
+    # the device would render an avatar immediately on boot; that bypassed
+    # Act 1 entirely. Now hello returns OK without queuing anything: the
+    # device renders QR until /submit comes in and pushes the real profile.
+    uid = STICKER_NUM_TO_UID.get(sticker)
+    return jsonify({"ok": True, "sticker": sticker, "my_uid": uid})
+
+
+@app.route("/api/device/poll", methods=["GET"])
+def api_device_poll():
+    """ESP32 long-poll style: drain queued events for this sticker. Returns
+    immediately even when empty so the device controls its own cadence —
+    a real long-poll with server-side wait would tie up a Flask worker."""
+    try:
+        sticker = int(request.args.get("sticker", ""))
+    except ValueError:
+        return jsonify({"error": "sticker must be int"}), 400
+    with _devices_lock:
+        slot = _devices.get(sticker)
+        if slot is None:
+            return jsonify({"error": "unknown sticker — call /api/device/hello first"}), 404
+        events = slot["events"]
+        slot["events"] = []
+        slot["last_seen"] = time.time()
+    return jsonify({"events": events})
+
+
+@app.route("/api/device/tap", methods=["POST"])
+def api_device_tap():
+    """ESP32 → server: 'I (me_sticker) just read peer_uid off NFC.' Server
+    computes the match (reusing compute_match) and pushes the result onto
+    BOTH devices' event queues so each side plays the animation on its own
+    screen. No SSE broadcast — direct routing keeps non-involved devices
+    out of the loop."""
+    body = request.get_json(silent=True) or {}
+    try:
+        me_sticker = int(body.get("me_sticker"))
+        if me_sticker < 1 or me_sticker > 5:
+            raise ValueError
+    except (TypeError, ValueError):
+        return jsonify({"error": "me_sticker must be int 1..5"}), 400
+    peer_uid = body.get("peer_uid")
+    if not isinstance(peer_uid, str) or not peer_uid:
+        return jsonify({"error": "peer_uid required"}), 400
+    me_uid = STICKER_NUM_TO_UID.get(me_sticker)
+    if not me_uid:
+        return jsonify({"error": f"unknown me_sticker {me_sticker}"}), 400
+    match = compute_match(me_uid, peer_uid)
+    if not match:
+        return jsonify({"error": "unknown peer_uid or self-tap",
+                        "me_uid": me_uid, "peer_uid": peer_uid}), 404
+    # Push to me unconditionally; push to peer ONLY if peer is also a
+    # registered device (sticker 1..5). A user might tap a stray NFC
+    # sticker that's listed in STAGE3_USERS but has no ESP32 online —
+    # match still happens on the tap-er's side.
+    peer_sticker = next(
+        (n for n, uid in STICKER_NUM_TO_UID.items() if uid == peer_uid),
+        None,
+    )
+    device_push(me_sticker, {"type": "match", **match})
+    if peer_sticker is not None:
+        device_push(peer_sticker, {"type": "match", **match})
+    # Also broadcast on stage3 SSE for backwards-compat with stage3.html.
+    stage3_broadcast("match", match)
+    return jsonify({"ok": True, "match": match, "peer_sticker": peer_sticker})
+
 
 @app.route("/events_stage3")
 def events_stage3():

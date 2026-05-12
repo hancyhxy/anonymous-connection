@@ -24,3 +24,12 @@ venv/
 
 # Stage 2 collected user submissions — local-only, regenerated per demo
 version2/web/users.json
+
+# Wi-Fi credentials & server address for ESP32 firmware. Each sketch checks
+# in a secrets.example.h template; the real per-board secrets are per-machine.
+# The board selector file `secrets.h` plus all `secrets_*.h` (secrets_a.h,
+# secrets_b.h, etc) carry real credentials and stay out of git.
+version2/firmware/*/secrets.h
+version2/firmware/*/secrets_*.h
+# Keep the example template even though it matches secrets_*.h glob.
+!version2/firmware/*/secrets.example.h

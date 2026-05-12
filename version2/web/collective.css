@@ -152,12 +152,6 @@ html, body {
   gap: 2px;
   white-space: nowrap;
 }
-.avatar-tile .tile-interest-icon {
-  font-size: calc(var(--tile-size) * 0.065);
-  line-height: 1;
-  opacity: 0.9;
-  font-variant-emoji: text;
-}
 .avatar-tile .tile-interest-sep {
   opacity: 0.4;
   user-select: none;
