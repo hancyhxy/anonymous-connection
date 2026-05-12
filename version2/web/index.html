@@ -10,112 +10,36 @@
   <main class="layout">
 
     <!-- ═══════════════════════════════════════════
-         LEFT COLUMN (desktop) / BOTTOM (mobile):
-         Options panel — user fills out Q_S, Q_A, Q_B,
-         smile toggle, quote free-text.
+         v14: two-step wizard. Step 1 = interest (matching),
+         Step 2 = avatar (presentation). DOM order matches
+         step order so screen readers and accidental scroll
+         both flow naturally. Hidden step is display:none.
          ═══════════════════════════════════════════ -->
-    <section id="options" aria-label="Choose your avatar">
-      <h1 class="title">today's you</h1>
+    <div class="step-indicator" role="progressbar" aria-label="step 1 of 2">
+      <span class="step-dot active" data-step-dot="1">1</span>
+      <span class="step-line"></span>
+      <span class="step-dot" data-step-dot="2">2</span>
+    </div>
 
-      <!-- Q_STICKER: which physical sticker the user is holding. Optional —
-           if left blank, this submission only goes to the collective wall;
-           if filled, it also binds to STAGE3_USERS so the device can tap. -->
-      <fieldset class="qblock" data-q="Q_STICKER">
-        <legend>which sticker do you have?</legend>
-        <select id="input-sticker">
-          <option value="">— none / just adding to the wall —</option>
-          <option value="1">sticker 1</option>
-          <option value="2">sticker 2</option>
-          <option value="3">sticker 3</option>
-          <option value="4">sticker 4</option>
-          <option value="5">sticker 5</option>
-        </select>
-      </fieldset>
+    <!-- ═══════════════════════════════════════════
+         STEP 1 — interest (matching layer).
+         Plain questionnaire. No avatar preview.
+         ═══════════════════════════════════════════ -->
+    <div class="step-panel" data-step="1">
 
-      <!-- Q_S: body / sex -->
-      <fieldset class="qblock" data-q="Q_S">
-        <legend>pick a body — which one feels like you today?</legend>
-        <div class="choices" id="opts-sex">
-          <label class="choice">
-            <input type="radio" name="sex" value="male" checked>
-            <span>male</span>
-          </label>
-          <label class="choice">
-            <input type="radio" name="sex" value="female">
-            <span>female</span>
-          </label>
-        </div>
-      </fieldset>
+      <section class="interest-intro">
+        <h2>interest</h2>
+        <p>you'll need at least one — these feed the match score, they don't show up on your avatar.</p>
+      </section>
 
-      <!-- Q_AVATAR: v6 — visual gallery replacing Q_LOOK + Q_POSE.
-           Renders 15 sprite thumbnails for the current sex (5 × 3).
-           Tile click sets state.color AND state.num atomically. -->
-      <fieldset class="qblock" data-q="Q_AVATAR">
-        <legend id="legend-avatar">which avatar feels like you today?</legend>
-        <div class="avatar-gallery" id="opts-avatar" role="radiogroup" aria-labelledby="legend-avatar">
-          <!-- populated by app.js: 15 .avatar-tile buttons -->
-        </div>
-      </fieldset>
-
-      <!-- Q_SMILE: independent smile dimension — completes the 60-variant matrix -->
-      <fieldset class="qblock" data-q="Q_SMILE">
-        <legend>smile?</legend>
-        <div class="choices" id="opts-smile">
-          <!-- populated by app.js from questions.json Q_SMILE -->
-        </div>
-      </fieldset>
-
-      <!-- Q_MOOD: vibe tag (no longer drives animation tempo or smile in v5) -->
-      <fieldset class="qblock" data-q="Q_MOOD">
-        <legend>how do you feel right now?</legend>
-        <div class="choices" id="opts-mood">
-          <!-- populated by app.js from questions.json Q_MOOD -->
-        </div>
-      </fieldset>
-
-      <!-- Q_ENERGY: background energy level — driven by heart rate when a
-           sensor is connected (see #hr-readout below). The slider stays as
-           a manual fallback for offline / no-sensor demos. -->
-      <fieldset class="qblock" data-q="Q_ENERGY">
-        <legend>what's your energy level?</legend>
-        <div class="slider-row">
-          <input type="range" id="slider-energy" min="0" max="5" step="1" value="2">
-          <span class="slider-label" id="slider-energy-label">medium</span>
-        </div>
-        <div class="hr-readout" id="hr-readout">♥ — no signal</div>
-      </fieldset>
-
-      <!-- Q_QUOTE: free text. Reads as appearance — it's the speech-bubble
-           floating above the avatar, so it groups with the look-and-feel
-           controls above rather than the match-score controls below. -->
-      <fieldset class="qblock" data-q="Q_QUOTE">
-        <legend>what are you thinking?</legend>
-        <input type="text" id="input-quote" maxlength="14"
-               placeholder="14 chars, ASCII only"
-               autocomplete="off">
-        <div class="suggestions" id="quote-suggestions">
-          <!-- populated by app.js -->
-        </div>
-      </fieldset>
-
-      <!-- ─── Interest Match ─────────────────────────────────────
-           Below this line: controls that feed Match Score, not the
-           visual avatar. Two-tier tag picker (primary + subtag).
-           ─────────────────────────────────────────────────────── -->
-
-      <!-- Q_INTERESTS: multi-select tag picker, max 3 -->
       <fieldset class="qblock" data-q="Q_INTERESTS">
-        <legend>pick up to 3 interests</legend>
+        <legend>pick 1 to 3 interests</legend>
         <div class="interests-grid" id="opts-interests">
           <!-- populated by app.js: 12 .interest-tag buttons -->
         </div>
         <div class="interest-hint" id="interests-hint" aria-live="polite"></div>
       </fieldset>
 
-      <!-- Q_INTERESTS_DETAIL: per-primary subtag picker. Hidden until user
-           picks at least one primary interest. Subtag selections drive the
-           collective-view similarity layout but are NEVER rendered on any
-           preview (phone, hardware, or wall). -->
       <fieldset class="qblock" data-q="Q_INTERESTS_DETAIL" id="qblock-subtags" hidden>
         <legend>get more specific (optional)</legend>
         <div id="opts-subtags">
@@ -123,58 +47,103 @@
         </div>
       </fieldset>
 
-      <!-- Submit to wall — POST current state to /submit. Disabled after
-           a successful submit to prevent duplicate entries. -->
-      <fieldset class="qblock submit-block">
-        <button id="btn-submit" type="button">submit to the wall</button>
-        <div id="submit-status" class="submit-status" aria-live="polite"></div>
-      </fieldset>
+    </div><!-- /step 1 -->
 
-      <!-- attribution -->
+    <!-- ═══════════════════════════════════════════
+         STEP 2 — avatar (presentation layer).
+         Top: sticky live preview.
+         Bottom: 3 collapsible groups (form / color / words).
+         ═══════════════════════════════════════════ -->
+    <div class="step-panel" data-step="2" hidden>
+
+      <!-- Sticky preview — pinned to the top so users can always relate
+           their edits to the visual result. -->
+      <section id="preview" class="preview-sticky" aria-label="live avatar preview">
+        <div id="preview-frame">
+          <div class="quote-bubble" id="quote-bubble" hidden>
+            <span class="quote-text" id="quote-text"></span>
+            <span class="quote-tail">▼</span>
+          </div>
+          <div class="asciiContainer" id="avatar-container">
+            <pre id="avatar-pre">loading sprites…</pre>
+          </div>
+          <div id="preview-placeholder" class="preview-placeholder">pick a body to begin</div>
+          <div class="preview-nickname" id="preview-nickname" aria-hidden="true"></div>
+        </div>
+      </section>
+
+      <!-- Accordion 1: pick your look — body + 15-tile gallery. -->
+      <details class="acc" data-acc="form" open>
+        <summary>pick your look</summary>
+        <div class="acc-body">
+          <div class="sex-pills" id="opts-sex" role="radiogroup" aria-label="body">
+            <button type="button" class="pill" data-sex="female"
+                    role="radio" aria-checked="false">female</button>
+            <button type="button" class="pill" data-sex="male"
+                    role="radio" aria-checked="false">male</button>
+          </div>
+
+          <div class="avatar-gallery" id="opts-avatar" role="radiogroup" aria-label="15 avatars">
+            <!-- populated by app.js -->
+          </div>
+        </div>
+      </details>
+
+      <!-- Accordion 2: pick a background color — hue swatch + brightness slider. -->
+      <details class="acc" data-acc="color">
+        <summary>pick a background color</summary>
+        <div class="acc-body">
+          <div class="mood-swatch-grid" id="opts-mood" role="radiogroup" aria-label="hue">
+            <!-- populated by app.js -->
+          </div>
+          <div class="slider-row">
+            <input type="range" id="slider-energy" min="0" max="5" step="1" value="2"
+                   aria-label="brightness">
+          </div>
+        </div>
+      </details>
+
+      <!-- Accordion 3: add some words — quote + nickname, both optional. -->
+      <details class="acc" data-acc="words">
+        <summary>add some words<span class="opt-tag">optional</span></summary>
+        <div class="acc-body">
+          <div class="qblock">
+            <label class="sub-legend" for="input-quote">what are you thinking?<span class="opt-tag">optional</span></label>
+            <input type="text" id="input-quote" maxlength="14"
+                   placeholder="14 chars, ASCII only"
+                   autocomplete="off">
+            <div class="suggestions" id="quote-suggestions"></div>
+          </div>
+
+          <div class="qblock">
+            <label class="sub-legend" for="input-nickname">what should we call you?<span class="opt-tag">optional</span></label>
+            <input type="text" id="input-nickname" maxlength="12"
+                   placeholder=""
+                   autocomplete="off">
+          </div>
+        </div>
+      </details>
+
       <footer class="attribution">
         Sprites by The Pudding (Alvin Chang), MIT License.<br>
         See <a href="https://github.com/hancyhxy/anonymous-connection#readme">how it works</a>.
       </footer>
-    </section>
 
-    <!-- ═══════════════════════════════════════════
-         RIGHT COLUMN (desktop) / TOP (mobile):
-         Live preview of the avatar, rendered directly
-         from sprites.json.
-         ═══════════════════════════════════════════ -->
-    <section id="preview" aria-label="Live avatar preview">
-
-      <div id="preview-frame">
-        <!-- quote bubble (hidden when empty) -->
-        <div class="quote-bubble" id="quote-bubble" hidden>
-          <span class="quote-text" id="quote-text"></span>
-          <span class="quote-tail">▼</span>
-        </div>
-
-        <!-- the avatar itself -->
-        <div class="asciiContainer" id="avatar-container">
-          <pre id="avatar-pre">loading sprites…</pre>
-        </div>
-
-        <!-- interest badges — populated by app.js, pinned to the bottom
-             of the preview frame (inside the tinted background). -->
-        <div class="preview-interests" id="preview-interests" aria-hidden="true"></div>
-      </div>
-
-      <div class="sprite-meta">
-        <code id="sprite-key">—</code>
-      </div>
-    </section>
+    </div><!-- /step 2 -->
 
   </main>
 
-  <!-- ═══════════════════════════════════════════
-       STATUS BAR — bottom edge, always visible.
-       Shows Web Serial connect state + last-sync info.
-       ═══════════════════════════════════════════ -->
-  <div class="status-bar" id="status-bar">
-    <button id="btn-connect" type="button">Connect Device</button>
-    <span class="status-text" id="status-text">device not connected</span>
+  <!-- v14: sticky bottom dock with wizard navigation.
+       Step 1 → single "next" button takes full width.
+       Step 2 → "back" + "submit" side by side.
+       JS toggles which buttons are visible and their disabled state. -->
+  <div class="submit-dock">
+    <div class="dock-row">
+      <button id="btn-back" type="button" hidden>← back</button>
+      <button id="btn-next" type="button">next →</button>
+      <button id="btn-submit" type="button" hidden>submit</button>
+    </div>
+    <div id="submit-status" class="submit-status" aria-live="polite"></div>
   </div>
 
   <script type="module" src="app.js"></script>

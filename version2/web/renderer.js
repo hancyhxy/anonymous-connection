@@ -110,8 +110,12 @@ export function resolveSprite(profile, sprites) {
  * @param {Object} sprites    - parsed sprites.json
  * @param {Object} colors     - parsed colors.json (with .energy used here)
  * @param {number} animFrame  - monotonically increasing tick from app.js
+ * @param {Object} [opts]     - { neutral: bool }. neutral=true forces a
+ *                              middle-grey base hex so the preview reads as
+ *                              "user hasn't picked a color yet" without
+ *                              special-casing the rest of the pipeline.
  */
-export function renderProfile(profile, sprites, colors, animFrame = 0) {
+export function renderProfile(profile, sprites, colors, animFrame = 0, opts = {}) {
   // 1. pick the sprite (outer key). Never changes unless the user changes
   //    sex/color/num/smile.
   const { key: spriteKey, frames, smileFellBack } = resolveSprite(profile, sprites);
@@ -121,21 +125,28 @@ export function renderProfile(profile, sprites, colors, animFrame = 0) {
     ? frames[animFrame % frames.length]
     : null;
 
-  // 2. v5: color source = palette[mood][bg_level]. mood picks a hue family
-  //    (pink for playful, grey for tired, teal→indigo for chill, etc.),
-  //    energy picks the brightness/saturation step inside that family.
-  //    Falls back to the legacy 1D energy scale if a palette cell is missing.
-  const moodKey = String(profile.mood);
-  const energyKey = String(profile.bg_level);
-  const paletteRow = colors.palette && colors.palette[moodKey];
-  const paletteCell = paletteRow && paletteRow[energyKey];
-  const legacyCell = colors.energy && colors.energy[energyKey];
-  const bgHex = (paletteCell && paletteCell.hex)
-    || (legacyCell && legacyCell.hex);
-  if (!bgHex) {
-    throw new Error(
-      `colors.json missing palette[${moodKey}][${energyKey}] and no legacy energy fallback`
-    );
+  // 2. Color source:
+  //    - opts.neutral=true → middle grey #888 → derives a flat grey avatar.
+  //      Used by app.js when the user hasn't touched the mood/bg selectors
+  //      yet, so the default-rendered avatar reads as "unfinished".
+  //    - else → palette[mood][bg_level]. mood picks a hue family, energy
+  //      picks brightness/saturation inside that family.
+  let bgHex;
+  if (opts.neutral) {
+    bgHex = "#888888";
+  } else {
+    const moodKey = String(profile.mood);
+    const energyKey = String(profile.bg_level);
+    const paletteRow = colors.palette && colors.palette[moodKey];
+    const paletteCell = paletteRow && paletteRow[energyKey];
+    const legacyCell = colors.energy && colors.energy[energyKey];
+    bgHex = (paletteCell && paletteCell.hex)
+      || (legacyCell && legacyCell.hex);
+    if (!bgHex) {
+      throw new Error(
+        `colors.json missing palette[${moodKey}][${energyKey}] and no legacy energy fallback`
+      );
+    }
   }
 
   // 3. derive three colors from the one hex (hello-stranger algorithm, unchanged).

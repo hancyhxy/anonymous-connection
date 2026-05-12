@@ -73,6 +73,8 @@ struct AvatarState {
   int          num;
   bool         smile;
   String       quote;
+  String       nickname;   // v10: replaces interest tag row on this surface.
+                           // Empty → nothing rendered in the bottom slot.
   InterestTag  interests[MAX_INTERESTS];
   int          interest_count;
   bool         valid;
@@ -176,7 +178,7 @@ uint32_t btnLastChangeMs = 0;      // millis() when btnLastReading last flipped
 // Vertical layout (240 px LCD):
 //   y=  6..28   quote bubble (single line, 22 px) + tail to y=32
 //   y= 32..208  sprite (176 px)
-//   y=212..232  interest tag row (~20 px)
+//   y=212..232  nickname row (~20 px, v10 — replaces interest tag row)
 // Quote is capped to a single line on web (maxlength=14), which freed
 // the headroom that previously held a 2-line bubble (BUBBLE_BOTTOM=48).
 #define SPRITE_ORIGIN_X ((LCD_W - SPRITE_PX_W) / 2)           // 48
@@ -253,7 +255,9 @@ uint32_t lightenHex(uint32_t hex) {
 // ---- App state -------------------------------------------------------------
 // Struct type defined near the top of the file (before Arduino IDE's
 // auto-prototype injection point). Here we only instantiate the singleton.
-AvatarState st = { 2, 2, "male", 0, 0, false, "", {}, 0, false };
+// Field order matches AvatarState above:
+//   mood, energy, sex, color, num, smile, quote, nickname, interests[], interest_count, valid
+AvatarState st = { 2, 2, "male", 0, 0, false, "", "", {}, 0, false };
 
 String lineBuf;
 // Latest-fully-received frame captured during a render-time drain. Set by
@@ -727,42 +731,29 @@ void drawQuoteBubble(uint16_t bg_color, uint16_t fg_color) {
   drawString2x(text_x, text_y, quote, total_cells, fg_color, bg_color);
 }
 
-// Interest tag row — bottom of screen, mirrors web's #preview-interests row.
-// Format: "<icon> <label>  <icon> <label>  <icon> <label>" (double-space
-// separator between tags). U+00B7 middot isn't in glyphs.h so we keep it
-// ASCII-only.
-//
-// Width budget: 240 px / 8 px per cell = 30 cells. Worst-case 3 tags
-// (`♠ gaming  ✈ travel  ◉ photo`) ≈ 27 cells. Web caps at 3 selections
-// so we don't have to handle overflow gracefully — just clip if needed.
-void drawInterestRow(uint16_t bg_color, uint16_t fg_color) {
-  if (st.interest_count == 0) return;
+// Nickname row — bottom of screen (v10).
+// Replaces the old interest tag row: interest is matching-layer only
+// and is intentionally not rendered on this surface (mirrors the web
+// preview and collective wall, which also stopped showing interests).
+// Width budget: 240 px / 8 px per cell = 30 cells; questions.json caps
+// nickname at 12 chars so it always fits comfortably.
+void drawNicknameRow(uint16_t bg_color, uint16_t fg_color) {
+  if (st.nickname.length() == 0) return;
 
-  // Build the row into a buffer so we can compute total width once and
-  // center the whole line. Buffer sized for worst case (3 tags × ~10 cells
-  // × 4 bytes/UTF-8 + separators) with comfortable margin.
-  char buf[96];
-  size_t bi = 0;
-  for (int i = 0; i < st.interest_count && bi + 24 < sizeof(buf); i++) {
-    if (i > 0) {
-      buf[bi++] = ' ';
-      buf[bi++] = ' ';
-    }
-    const char* icon  = st.interests[i].icon.c_str();
-    const char* label = st.interests[i].label.c_str();
-    while (*icon  && bi + 1 < sizeof(buf)) buf[bi++] = *icon++;
-    if (bi + 1 < sizeof(buf)) buf[bi++] = ' ';
-    while (*label && bi + 1 < sizeof(buf)) buf[bi++] = *label++;
-  }
-  buf[bi] = '\0';
-
-  size_t cells = countCells(buf);
-  int16_t row_w = (int16_t)cells * GLYPH_W;
+  const char* nick = st.nickname.c_str();
+  size_t cells = countCells(nick);
+  // v13.3: switched from drawString (8px) to drawString2x (16px cells)
+  // so nickname carries proper visual weight against the quote bubble
+  // at the top. Width budget: 12 chars × 16 px = 192 px, fits 240 px LCD.
+  const int16_t CELL_W_2X = 16;
+  int16_t row_w = (int16_t)cells * CELL_W_2X;
   int16_t x = (LCD_W - row_w) / 2;
-  if (x < 0) x = 0;                    // clip-left if it overflows
-  int16_t y = 212;                     // sprite ends at 208; 4 px gap
+  if (x < 0) x = 0;
+  // y=216 leaves a 6 px gap above the row (sprite ends at 208) and
+  // 8 px below the 16 px tall row (216 + 16 = 232, screen height 240).
+  int16_t y = 216;
 
-  drawString(x, y, buf, fg_color, bg_color, /*bold=*/true);
+  drawString2x(x, y, nick, cells, fg_color, bg_color);
 }
 
 // Full redraw — used when outer state (mood/energy/sprite identity/quote) changes.
@@ -834,7 +825,7 @@ void renderFull() {
   drawQuoteBubble(bgSoft565, mainCol565);
   drainSerialIntoBuf();
 
-  drawInterestRow(bgSoft565, mainCol565);
+  drawNicknameRow(bgSoft565, mainCol565);
   drainSerialIntoBuf();
 }
 
@@ -1019,10 +1010,19 @@ int wrapHint(const char* s, int max_chars, String* out, int max_lines) {
 
 // Draw the wrapped hint centered vertically in a single color (fade can be
 // achieved by re-calling with a mix565 result at the call site).
+// v13.4: bumped from drawString (8 px) to drawString2x (16 px cells) so
+// hint reads with the same visual weight as the percentage and nickname.
+// MAX_CHARS halved (30→15) because each cell is now 16 px wide.
+// v13.5: LINE_H tuned from 32→22 — 32 left a full character of empty
+// space between rows; 22 gives ~6 px of breathing room above each line
+// (16 px glyph + 6 px gap), matching typographic norms.
+// v13.6: tightened further to 18 — Xinyi preferred denser spacing
+// (16 px glyph + 2 px gap), reads as "one block of text" not "a list".
 void drawMatchHint(uint16_t fg) {
   const int LINE_H    = 18;
-  const int MAX_CHARS = 30;
+  const int MAX_CHARS = 15;
   const int MAX_LINES = 6;
+  const int CELL_W_2X = 16;
   String lines[MAX_LINES];
   int n = wrapHint(matchHint.c_str(), MAX_CHARS, lines, MAX_LINES);
   if (n == 0) return;
@@ -1030,9 +1030,9 @@ void drawMatchHint(uint16_t fg) {
   int16_t y = (240 - total_h) / 2;
   for (int li = 0; li < n; li++) {
     size_t cells = countCells(lines[li].c_str());
-    int16_t line_w = (int16_t)(cells * GLYPH_W);
+    int16_t line_w = (int16_t)(cells * CELL_W_2X);
     int16_t x = (240 - line_w) / 2;
-    drawString(x, y + li * LINE_H, lines[li].c_str(), fg, matchBg565, /*bold=*/true);
+    drawString2x(x, y + li * LINE_H, lines[li].c_str(), cells, fg, matchBg565);
     // Drain between lines so a long hint (4+ wrapped lines × ~10 ms each)
     // doesn't keep the RX FIFO blocked long enough to merge two host frames.
     drainSerialIntoBuf();
@@ -1044,9 +1044,18 @@ void drawMatchHint(uint16_t fg) {
 // (score=0 / no overlap), shows the "so different but..." fallback copy.
 // Same fade-via-mix565 pattern as drawMatchHint — caller picks the color.
 void drawCommonScreen(uint16_t fg) {
-  const int LINE_H    = 18;
-  const int MAX_CHARS = 30;
-  const int MAX_LINES = 4;
+  // v13.4: same 8→16 px upgrade as drawMatchHint above. Caption + body
+  // both use drawString2x; LINE_H + CAPTION_GAP scaled proportionally.
+  // MAX_CHARS halved (30→15).
+  // v13.5: LINE_H 32→22 to tighten body line spacing (16 px glyph +
+  // 6 px gap); CAPTION_GAP 12→10 to keep caption-to-body proportional.
+  // v13.6: tightened further to 18 / 8 — matches drawMatchHint cadence
+  // so the caption→body→hint flow reads at one consistent rhythm.
+  const int LINE_H      = 18;
+  const int MAX_CHARS   = 15;
+  const int MAX_LINES   = 4;
+  const int CAPTION_GAP = 8;
+  const int CELL_W_2X   = 16;
   const bool hasTags  = matchCommonTags.length() > 0;
   const char* caption = hasTags ? "you both like" : "you are so different,";
   const char* body    = hasTags ? matchCommonTags.c_str() : "but...";
@@ -1057,24 +1066,23 @@ void drawCommonScreen(uint16_t fg) {
   int n_body = wrapHint(body, MAX_CHARS, body_lines, MAX_LINES);
   if (n_body == 0) return;
 
-  // Layout: caption + 8 px gap + body lines, vertically centered as a block.
-  const int CAPTION_GAP = 8;
+  // Layout: caption + gap + body lines, vertically centered as a block.
   int16_t total_h = (int16_t)(LINE_H + CAPTION_GAP + n_body * LINE_H);
   int16_t y = (240 - total_h) / 2;
 
   size_t cap_cells = countCells(caption);
-  int16_t cap_w = (int16_t)(cap_cells * GLYPH_W);
+  int16_t cap_w = (int16_t)(cap_cells * CELL_W_2X);
   int16_t cap_x = (240 - cap_w) / 2;
-  drawString(cap_x, y, caption, fg, matchBg565, /*bold=*/true);
+  drawString2x(cap_x, y, caption, cap_cells, fg, matchBg565);
   drainSerialIntoBuf();
 
   int16_t body_y = y + LINE_H + CAPTION_GAP;
   for (int li = 0; li < n_body; li++) {
     size_t cells  = countCells(body_lines[li].c_str());
-    int16_t line_w = (int16_t)(cells * GLYPH_W);
+    int16_t line_w = (int16_t)(cells * CELL_W_2X);
     int16_t x = (240 - line_w) / 2;
-    drawString(x, body_y + li * LINE_H, body_lines[li].c_str(),
-               fg, matchBg565, /*bold=*/true);
+    drawString2x(x, body_y + li * LINE_H, body_lines[li].c_str(),
+                 cells, fg, matchBg565);
     drainSerialIntoBuf();
   }
 }
@@ -1272,9 +1280,12 @@ void handleLine(const String &line) {
   if (doc["smile"].is<bool>())              st.smile  = doc["smile"].as<bool>();
   if (doc["sex"].is<const char*>())         st.sex    = String((const char*)doc["sex"]);
   if (doc["quote"].is<const char*>())       st.quote  = String((const char*)doc["quote"]);
+  if (doc["nickname"].is<const char*>())    st.nickname = String((const char*)doc["nickname"]);
+  else if (!doc["nickname"].isNull())       st.nickname = "";
 
-  // Interests: optional array of {icon, label}. Absent key → clear.
-  // Missing/non-object entries silently skipped; max MAX_INTERESTS kept.
+  // Interests: still parsed for forward compatibility but NOT rendered
+  // on this surface (v10). Match score is computed server-side. The slot
+  // below the sprite is the nickname row now.
   st.interest_count = 0;
   if (doc["interests"].is<JsonArray>()) {
     for (JsonObject tag : doc["interests"].as<JsonArray>()) {
@@ -1291,8 +1302,9 @@ void handleLine(const String &line) {
   st.valid = true;
   outerDirty = true;
 
-  Serial.printf("[serial_avatar] OK mood=%d energy=%d sex=%s color=%d num=%d smile=%d quote=\"%s\" interests=%d\n",
-                st.mood, st.energy, st.sex.c_str(), st.color, st.num, st.smile, st.quote.c_str(), st.interest_count);
+  Serial.printf("[serial_avatar] OK mood=%d energy=%d sex=%s color=%d num=%d smile=%d quote=\"%s\" nickname=\"%s\" interests=%d(unused)\n",
+                st.mood, st.energy, st.sex.c_str(), st.color, st.num, st.smile,
+                st.quote.c_str(), st.nickname.c_str(), st.interest_count);
 }
 
 
@@ -1331,18 +1343,20 @@ void applyProfileEvent(JsonObject ev) {
     if (a["mood"].is<int>())          st.mood   = a["mood"].as<int>();
     if (a["bg_level"].is<int>())      st.energy = a["bg_level"].as<int>();
   }
-  if (ev["quote"].is<const char*>())  st.quote  = String((const char*)ev["quote"]);
+  if (ev["quote"].is<const char*>())     st.quote    = String((const char*)ev["quote"]);
+  if (ev["nickname"].is<const char*>())  st.nickname = String((const char*)ev["nickname"]);
+  else if (!ev["nickname"].isNull())     st.nickname = "";
 
-  // interests: server stores ["music","film",...] as strings; firmware's
-  // interest tag row expects {icon,label} objects. We don't have icon
-  // metadata server-side yet, so just count for now — rendering stays empty
-  // until we plumb icons through. Doesn't regress current behavior.
+  // interests: parsed for forward compatibility but NOT rendered on this
+  // surface (v10). compute_match() runs server-side; the bottom row of
+  // the LCD is the nickname slot.
   st.interest_count = 0;
 
   st.valid    = true;
   outerDirty  = true;
-  Serial.printf("[serial_avatar] profile applied: sex=%s color=%d num=%d smile=%d mood=%d energy=%d quote=\"%s\"\n",
-                st.sex.c_str(), st.color, st.num, st.smile, st.mood, st.energy, st.quote.c_str());
+  Serial.printf("[serial_avatar] profile applied: sex=%s color=%d num=%d smile=%d mood=%d energy=%d quote=\"%s\" nickname=\"%s\"\n",
+                st.sex.c_str(), st.color, st.num, st.smile, st.mood, st.energy,
+                st.quote.c_str(), st.nickname.c_str());
 }
 
 // Build a JsonDocument from a poll event and dispatch into handleMatch

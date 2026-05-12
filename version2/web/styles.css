@@ -37,42 +37,126 @@ html, body {
 }
 
 /* ──────────────────────────────────────────────
-   LAYOUT — unified stacked composition across desktop + mobile.
-   Preview card on top, options below. On wide screens the content
-   column is centered and max-width-capped so it doesn't stretch
-   across the entire monitor (keeps the "phone-app" feel).
+   LAYOUT — v14 wizard. Top-level structure:
+     <main class="layout">
+       <div class="step-indicator">                  ← 2 dots + connector
+       <div class="step-panel" data-step="1">         ← step 1: interest
+       <div class="step-panel" data-step="2" hidden>  ← step 2: avatar
+         <section #preview class="preview-sticky">  ← sticky top
+         <details class="acc">                       ← accordion x 3
+       </div>
+     </main>
+     <div class="submit-dock">                       ← fixed-bottom nav
+       <div class="dock-row">[back][next][submit]</div>
    ────────────────────────────────────────────── */
 .layout {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-height: calc(100vh - 48px);   /* 48px status bar */
+  min-height: 100vh;
+  /* v13: bigger bottom padding so .submit-dock (fixed to viewport
+     bottom) doesn't cover the last accordion / footer content. */
+  padding: 16px 16px 120px 16px;
 }
 
-/* options in source order comes first → rendered on top (as requested).
-   Preview card follows, scrolls with the rest of the page. */
-#options {
-  width: 100%;
-  max-width: 820px;
-  padding: 24px 24px 24px 24px;
-}
-
-#preview {
+/* v14: tabs → wizard. step-indicator and step-panel replace tabs and
+   tab-panel. Width constraints kept identical so layout doesn't shift. */
+.step-indicator,
+.step-panel {
   width: 100%;
   max-width: 520px;
-  padding: 8px 16px calc(48px + 32px) 16px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
 }
 
-@media (max-width: 640px) {
-  #options {
-    max-width: 520px;
-    padding: 20px 20px 20px 20px;
+.step-panel {
+  display: flex;
+  flex-direction: column;
+}
+.step-panel[hidden] {
+  display: none;
+}
+
+/* Step dots — minimal indicator at the top. Filled = current,
+   dim outline = upcoming, filled-with-check = completed. */
+.step-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0;
+  margin: 0 0 24px 0;
+}
+.step-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.step-dot.active {
+  background: var(--text-primary);
+  color: var(--bg-panel);
+  border-color: var(--text-primary);
+}
+.step-dot.done {
+  background: transparent;
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.step-line {
+  flex: 0 0 40px;
+  height: 1px;
+  background: var(--border);
+  margin: 0 8px;
+}
+
+/* Sticky preview — pinned to the top of the avatar tab. Sized to ~35vh
+   so the avatar stays visible while the accordions below take focus.
+   The translucent backdrop keeps the divider clean as content scrolls
+   under the preview. */
+.preview-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  width: 100%;
+  height: 35vh;
+  min-height: 240px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-base, #111);
+  padding: 8px 0;
+  margin: 0 0 12px 0;
+}
+.preview-sticky #preview-frame {
+  /* Mobile: sticky region is height-constrained (35vh), so size the
+     frame to fit the available height while keeping the 1:1 aspect
+     ratio. width:auto lets aspect-ratio compute width from height. */
+  width: auto;
+  height: 100%;
+  max-height: 100%;
+}
+
+/* v13.1: desktop / wide viewport — pin the preview to a fixed 360×360
+   square. On tall desktop windows 35vh becomes 400-500px and that was
+   pulling #preview-frame into a vertical rectangle (height:100% above
+   stretched the frame past its 1:1 ratio). Mobile (<640px) is left
+   untouched — the 35vh rule above produces a correct square there
+   because the viewport is roughly as tall as the column is wide. */
+@media (min-width: 640px) {
+  .preview-sticky {
+    height: 360px;
+    min-height: 360px;
   }
-  #preview {
-    padding: 8px 16px calc(48px + 32px) 16px;
+  .preview-sticky #preview-frame {
+    width: 360px;
+    height: 360px;
+    max-height: 360px;
   }
 }
 
@@ -87,11 +171,315 @@ html, body {
   color: var(--text-primary);
 }
 
+/* v14: tabs/tab-btn block removed — replaced by step-indicator above. */
+
+/* ──────────────────────────────────────────────
+   ACCORDION (<details>) — v11.
+   Three collapsible groups inside the avatar tab.
+   ────────────────────────────────────────────── */
+.acc {
+  width: 100%;
+  margin: 0 0 12px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  overflow: hidden;
+  transition: border-color 200ms;
+}
+.acc[open] {
+  border-color: var(--text-muted);
+}
+.acc.invalid,
+.qblock.invalid {
+  border-color: #e08080;
+  animation: invalidPulse 1.6s ease-out;
+}
+.qblock.invalid {
+  border: 1px solid #e08080;
+  border-radius: 8px;
+  padding: 8px;
+  margin: 0 0 16px 0;
+}
+@keyframes invalidPulse {
+  0%   { box-shadow: 0 0 0 0 rgba(224, 128, 128, 0.6); }
+  60%  { box-shadow: 0 0 0 8px rgba(224, 128, 128, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(224, 128, 128, 0); }
+}
+.acc > summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 14px 18px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+}
+.acc > summary::-webkit-details-marker { display: none; }
+.acc > summary::after {
+  content: "▾";
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  transition: transform 200ms;
+}
+.acc[open] > summary::after { transform: rotate(180deg); }
+.acc .acc-body {
+  padding: 4px 18px 18px 18px;
+}
+
+/* Optional-field tag inside summary or sub-legend. */
+.opt-tag {
+  font-size: 0.7rem;
+  font-weight: 400;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-left: 8px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+}
+
+/* Sub-legend inside Q_QUOTE / Q_NICKNAME blocks. */
+.sub-legend {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin: 0 0 8px 0;
+  letter-spacing: 0.02em;
+}
+
+/* ──────────────────────────────────────────────
+   SEX PILLS — v11 capsule selector replacing radio inputs.
+   ────────────────────────────────────────────── */
+.sex-pills {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 16px 0;
+}
+.sex-pills .pill {
+  flex: 1;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 0.95rem;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.sex-pills .pill:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+.sex-pills .pill.active {
+  background: var(--text-primary);
+  color: var(--bg-panel);
+  border-color: var(--text-primary);
+}
+
+/* ──────────────────────────────────────────────
+   EMPTY STATE — v12.
+   Three layers of placeholder visuals shown while
+   required accordion groups are still untouched.
+   ────────────────────────────────────────────── */
+
+/* (1) preview frame in stage 1 — flat grey, no derived palette colors. */
+#preview-frame.placeholder-mode {
+  background: #2a2a2a;
+  border-color: #444;
+}
+
+/* (2) preview frame's centered guidance line in stage 1.
+   JS flips display:none → flex when touched.look is false. */
+.preview-placeholder {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  inset: 0;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  font-style: italic;
+  letter-spacing: 0.03em;
+  pointer-events: none;
+  text-align: center;
+  padding: 0 16px;
+}
+
+/* (3) avatar tile gallery placeholder — shown while state.sex is null.
+   v14.1: .avatar-gallery is a 5-column grid, so a single child element
+   would otherwise be squeezed into 1/5 of the row (≈ 50 px) and the
+   text would break into a vertical stack of single letters. grid-column
+   1/-1 makes the placeholder span the full row horizontally. */
+.gallery-placeholder {
+  grid-column: 1 / -1;
+  padding: 32px 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  font-style: italic;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+
+/* v13: .validate-status block removed — the sticky submit button
+   doubles as the validation prompt, so a separate red bar would
+   just be duplicate signal. */
+
+/* ──────────────────────────────────────────────
+   STICKY DOCK — v14 wizard navigation.
+   Step 1 shows [next] full width.
+   Step 2 shows [← back] [submit] side by side.
+   Hidden buttons collapse so layout reflows naturally.
+   ────────────────────────────────────────────── */
+.submit-dock {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 50;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px)) 16px;
+  background: var(--bg-base, #111);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+.dock-row {
+  width: 100%;
+  max-width: 520px;
+  display: flex;
+  gap: 10px;
+}
+.dock-row > button {
+  flex: 1;
+  padding: 14px 16px;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  font-family: inherit;
+  transition: background 120ms, opacity 120ms, color 120ms;
+}
+.dock-row > button[hidden] {
+  display: none;
+}
+
+/* Back: secondary outline style — it's a navigation aid, not the
+   primary action. Always enabled. */
+#btn-back {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid var(--border) !important;
+  flex: 0 0 auto;
+  min-width: 96px;
+}
+#btn-back:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted) !important;
+}
+
+/* Next + Submit share the same CTA shape. Disabled visually when their
+   step's requirements aren't met (but they stay clickable so click can
+   scroll to the missing field). */
+#btn-next,
+#btn-submit {
+  background: var(--accent);
+  color: #111;
+}
+#btn-next:hover,
+#btn-submit:hover {
+  filter: brightness(1.08);
+}
+#btn-next[data-unmet],
+#btn-submit[data-unmet] {
+  background: #2a2a2a;
+  color: var(--text-muted);
+}
+#btn-next[data-unmet]:hover,
+#btn-submit[data-unmet]:hover {
+  background: #353535;
+  filter: none;
+}
+.submit-status {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  text-align: center;
+  min-height: 1.2em;
+}
+.submit-status.success { color: #80d080; }
+.submit-status.error   { color: #e08080; }
+
+/* Interest tab intro card (no avatar preview, plain questionnaire). */
+.interest-intro {
+  margin: 12px 0 20px 0;
+}
+.interest-intro h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0 0 8px 0;
+  color: var(--text-primary);
+}
+.interest-intro p {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+/* ──────────────────────────────────────────────
+   MOOD SWATCHES — 5 hue anchors (Q_MOOD_BG).
+   No text labels — colors speak for themselves.
+   ────────────────────────────────────────────── */
+.mood-swatch-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+}
+.mood-swatch {
+  height: 56px;
+  border: 3px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 100ms, border-color 100ms;
+}
+.mood-swatch:hover {
+  transform: scale(1.05);
+}
+.mood-swatch.selected {
+  border-color: var(--text-primary);
+}
+
+/* nickname input — visually identical to #input-quote so the two
+   text fields stack naturally as siblings in the avatar tab. */
+#input-nickname {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: "SF Mono", Menlo, monospace;
+  font-size: 0.95rem;
+}
+#input-nickname:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .qblock {
   border: none;
   padding: 0;
-  margin: 0 0 28px 0;
+  margin: 0 0 16px 0;
 }
+.qblock:last-child { margin-bottom: 0; }
 
 .qblock legend {
   font-size: 0.85rem;
@@ -244,72 +632,36 @@ html, body {
    to /submit. After success it stays disabled to avoid duplicate
    entries; sessionStorage gates a second submit too.
    ────────────────────────────────────────────── */
-.submit-block {
-  margin-top: 8px;
-}
-.submit-block button {
-  width: 100%;
-  padding: 14px 16px;
-  background: var(--accent);
-  color: var(--bg-page);
-  border: none;
-  border-radius: 8px;
-  font-size: 0.95rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  cursor: pointer;
-  transition: background 0.15s, opacity 0.15s;
-  font-family: inherit;
-}
-.submit-block button:hover:not(:disabled) {
-  background: #9bd6e8;
-}
-.submit-block button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.submit-status {
-  margin-top: 10px;
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  min-height: 1.2em;
-}
-.submit-status.success { color: var(--accent); }
-.submit-status.error   { color: #e87b7b; }
+/* v13: duplicate .submit-block rules were here — removed; the single
+   source of truth is now .submit-dock above. */
 
-/* Preview-side inline badges — a single line of selected interests
-   pinned to the bottom of #preview-frame (inside the tinted background),
-   so it reads as "avatar + tags" on one card. */
-.preview-interests {
+/* Preview-side nickname row — pinned to the bottom of #preview-frame,
+   inside the tinted background. v10 replaces the old interest tag row:
+   interest is matching-layer only and never rendered on any surface;
+   nickname (optional) occupies the slot the interest row used to use. */
+.preview-nickname {
   position: absolute;
-  bottom: 40px;
-  left: 16px;
-  right: 16px;
+  /* v13.2: bottom was 40px which fell outside short frame heights
+     (mobile sticky frame ≈ 290px after the 35vh sizing rule) and
+     got clipped by #preview-frame's overflow:hidden. Percentage
+     scales with frame height so the nickname sits ~6% above the
+     bottom edge in both mobile and desktop layouts. */
+  bottom: 6%;
+  left: 8%;
+  right: 8%;
   display: none;
-  flex-wrap: wrap;
   justify-content: center;
-  gap: 8px 12px;
-  font-size: 1.05rem;
-  font-weight: 500;
+  text-align: center;
+  font-size: clamp(0.85rem, 3vw, 1.1rem);
+  font-weight: 600;
   color: var(--darker-color, var(--text-primary));
   line-height: 1.4;
+  letter-spacing: 0.02em;
   pointer-events: none;
 }
 
-.preview-interests.visible {
+.preview-nickname.visible {
   display: flex;
-}
-
-.preview-interest {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  white-space: nowrap;
-}
-
-.preview-interest-sep {
-  opacity: 0.4;
-  user-select: none;
 }
 
 /* ──────────────────────────────────────────────
@@ -397,36 +749,48 @@ html, body {
   accent-color: var(--accent);
 }
 
-/* energy slider */
+/* energy / brightness slider — v10 gradient track.
+   Track background is set inline by app.js updateEnergySliderGradient()
+   from colors.palette[mood][0..5].hex so users see what brightness range
+   the current hue offers before they drag. */
 .slider-row {
   display: flex;
   align-items: center;
   gap: 12px;
+  margin-top: 12px;
 }
 .slider-row input[type="range"] {
   flex: 1;
-  accent-color: var(--accent);
 }
-.slider-label {
-  min-width: 70px;
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
+#slider-energy {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 24px;
+  border-radius: 12px;
+  outline: none;
+  cursor: pointer;
+  /* background set by JS */
 }
-
-/* Heart-rate readout sits below the slider. Goes muted-grey when there's
-   no sensor signal (so demos without hardware look the same as before),
-   and accent-colored + slightly larger when a BPM is being received. */
-.hr-readout {
-  margin-top: 8px;
-  font-size: 0.85rem;
-  color: var(--text-muted);
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.02em;
+#slider-energy::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #111;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
 }
-.hr-readout.active {
-  color: var(--accent);
-  font-weight: 500;
+#slider-energy::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #fff;
+  border: 2px solid #111;
+  cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.4);
 }
 
 /* quote input */
@@ -511,13 +875,16 @@ html, body {
   left: 50%;
   transform: translate(-50%, -50%);
   max-width: 80%;
-  padding: 9px 14px;
+  /* v13.2: padding + font-size scale with viewport so the bubble keeps
+     its proportions on small mobile preview frames (where 9px/1rem
+     used to crowd the sprite) while staying full-size on desktop. */
+  padding: clamp(4px, 1.5vw, 9px) clamp(8px, 2.5vw, 14px);
   background: var(--bg-color-soft);
   border: 1px solid var(--person-color);
   border-radius: 6px;
   color: var(--person-color);
   font-family: "SF Mono", Menlo, monospace;
-  font-size: 1rem;
+  font-size: clamp(0.7rem, 2.8vw, 1rem);
   font-weight: 500;
   text-align: center;
   z-index: 2;
@@ -529,7 +896,8 @@ html, body {
   transform: translateX(-50%);
   color: var(--person-color);
   font-family: "SF Mono", Menlo, monospace;
-  font-size: 1.1rem;
+  /* v13.2: tail glyph shrinks alongside the bubble. */
+  font-size: clamp(0.75rem, 3vw, 1.1rem);
   line-height: 0.5;
 }
 
@@ -545,7 +913,14 @@ html, body {
    ────────────────────────────────────────────── */
 .asciiContainer {
   font-family: "Lucida Console", Monaco, "Courier New", monospace;
-  font-size: 22px;                /* baseline character size (v5: 18→22 for larger figure) */
+  /* v13.2: was fixed 22px which overflowed the smaller sticky preview
+     frame (~290px on mobile, 360px on desktop). clamp scales the sprite
+     to fit while keeping a ceiling on desktop.
+     v13.6: ceiling lowered 22→18 because 22 still overflowed the 74%
+     usable vertical area (after padding-top 12% + padding-bottom 14%),
+     causing nickname row to collide with the sprite's feet. 18 leaves
+     ~30 px of breathing room above the nickname. */
+  font-size: clamp(13px, 4vw, 18px);
   font-weight: bold;
   letter-spacing: -0.1em;
   color: var(--person-color);
@@ -554,12 +929,15 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  /* Nudge vertical position. The whole avatar+bubble+tags stack should
-     feel centered-slightly-high — tweak these two to shift the avatar
-     itself. Positive padding-bottom lifts the avatar up; padding-top
-     pushes it down. */
-  padding-top: 0;
-  padding-bottom: 6%;
+  /* v13.2: bumped padding-bottom from 6% to 14% so the sprite ends well
+     above the .preview-nickname row (which sits at bottom:6%).
+     v13.6: added padding-top 12% so the sprite's head doesn't collide
+     with the quote bubble at the top of the frame (bubble lives around
+     top:12%). The total 26% vertical padding shrinks sprite height by
+     ~26% but our 22 px clamp ceiling × ~18 rows ≈ 218 px still fits
+     in the smallest sticky frame (mobile ~290 px × 0.74 ≈ 215 px). */
+  padding-top: 12%;
+  padding-bottom: 14%;
 }
 
 /* Pixel-art squish: hello-stranger keeps line-height *much* smaller than
@@ -584,44 +962,7 @@ html, body {
   display: none;
 }
 
-/* ──────────────────────────────────────────────
-   STATUS BAR (bottom)
-   ────────────────────────────────────────────── */
-.status-bar {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  height: 48px;
-  background: var(--bg-panel);
-  border-top: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 0 20px;
-  font-size: 0.85rem;
-  z-index: 100;
-}
-
-#btn-connect {
-  padding: 6px 14px;
-  background: var(--accent);
-  color: #111;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-weight: 600;
-  font-size: 0.85rem;
-}
-#btn-connect:hover { background: #9fd5e8; }
-#btn-connect[disabled] {
-  background: #444;
-  color: #999;
-  cursor: not-allowed;
-}
-
-.status-text {
-  color: var(--text-muted);
-}
-.status-text.ok { color: #80d080; }
-.status-text.err { color: #e08080; }
+/* Status bar (Connect Device button + serial connection state) was
+   removed in v10. Web Serial is no longer used — devices poll the
+   server over Wi-Fi via HTTP, so there's nothing for the browser to
+   "connect" to. */

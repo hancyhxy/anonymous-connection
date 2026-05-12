@@ -103,6 +103,7 @@ STAGE3_USERS = {
         "interests": ["music", "film", "art"],
         "interest_details": {"music": ["indie"], "film": ["sci-fi"], "art": ["painting"]},
         "quote":     "open to chat",
+        "nickname":  "",
     },
     "65:BC:56:A7": {
         "user_id":   "u2",
@@ -112,6 +113,7 @@ STAGE3_USERS = {
         "interests": ["music", "film", "tech"],
         "interest_details": {"music": ["indie"], "film": ["sci-fi"], "tech": ["gaming-tech"]},
         "quote":     "say hi",
+        "nickname":  "",
     },
     "65:D5:7F:A7": {
         "user_id":   "u3",
@@ -121,6 +123,7 @@ STAGE3_USERS = {
         "interests": ["film", "books", "photo"],
         "interest_details": {"film": ["docu"], "books": ["fiction"], "photo": ["portrait"]},
         "quote":     "daydreaming",
+        "nickname":  "",
     },
     "65:E9:22:A7": {
         "user_id":   "u4",
@@ -130,6 +133,7 @@ STAGE3_USERS = {
         "interests": ["sport", "food", "gaming"],
         "interest_details": {"sport": ["cycling"], "food": ["coffee"], "gaming": ["console"]},
         "quote":     "need coffee",
+        "nickname":  "",
     },
     "75:2A:E7:A7": {
         "user_id":   "u5",
@@ -139,6 +143,7 @@ STAGE3_USERS = {
         "interests": ["music", "art", "dance"],
         "interest_details": {"music": ["pop"], "art": ["painting"], "dance": ["contemporary"]},
         "quote":     "same vibe?",
+        "nickname":  "",
     },
 }
 
@@ -335,15 +340,20 @@ def submit():
             "interests":        profile.get("interests", []),
             "interest_details": profile.get("interest_details", {}),
             "quote":            profile.get("quote", ""),
+            "nickname":         profile.get("nickname", ""),
         }
         # If the ESP32 for this sticker is online, hand it the freshly-DIY'd
         # profile so it can flip from WAITING_PROFILE to SHOWING_PROFILE on
         # its next poll. device_push is a no-op when no device has said
-        # hello — safe to call unconditionally.
+        # hello — safe to call unconditionally. interests/interest_details
+        # are still pushed so the device can use them as fixture/cache, but
+        # the firmware does not render them — only nickname occupies the
+        # bottom slot now.
         device_push(int(sticker_num), {
             "type":   "profile",
             "avatar": STAGE3_USERS[uid]["avatar"],
             "quote":  STAGE3_USERS[uid]["quote"],
+            "nickname":         STAGE3_USERS[uid]["nickname"],
             "interests":        STAGE3_USERS[uid]["interests"],
             "interest_details": STAGE3_USERS[uid]["interest_details"],
         })

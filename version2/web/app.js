@@ -1,88 +1,101 @@
 // =============================================================
-// pip v2 — app.js (v6)
+// pip v2 — app.js (v10)
 //
-// User-facing dimensions:
-//   1. sex       — 2 (male/female)
-//   2. avatar    — 15 per sex (Q_AVATAR gallery, v6)
-//                  Internally encoded as (color, num) = (0..4, 0..2),
-//                  but the user sees ONE 15-tile visual picker, not a
-//                  5 × 3 composition. The 15 sprites are independent
-//                  hand-drawn illustrations; there is no "same character
-//                  in a different pose" — that was a v5 UI fiction.
-//   3. smile     — 2 (neutral/smile — independent dim since v5)
-//   4. mood      — 5 (vibe tag; no longer affects animation)
-//   5. bg_level  — 6 (energy; SINGLE color source)
-//   6. quote     — free text, 14 ASCII chars (single-line on device)
+// User-facing structure (two parallel tabs, NOT a wizard):
 //
-// Internal sprite matrix stays 2 × 5 × 3 × 2 = 60 keys
-// (sex_color_num[smile]), unchanged — only the UI collapses.
-// Missing smile variants fall back to neutral inside resolveSprite().
+//   Tab "avatar" — presentation layer.
+//     1. sex       — 2 (male/female)
+//     2. avatar    — 15 per sex (Q_AVATAR gallery)
+//     3. mood + bg — Q_MOOD_BG: 5 hue swatches + brightness slider
+//     4. quote     — free text, 14 ASCII chars
+//     5. nickname  — optional, 12 ASCII chars
 //
-// Hidden parameters (code-level constants, NOT exposed in UI):
-//   - ANIM_INTERVAL_MS: tempo of the subtle in-sprite micro-animation.
-//     Matches hello-stranger's original 1000/6 ≈ 166ms cadence. Changing
-//     it alters the breathing/blinking rhythm but never the identity.
+//   Tab "interest" — matching layer.
+//     6. interests       — primary tags (max 3)
+//     7. interest_details — per-primary subtags
+//
+// Smile was dropped in v10 — sprite falls back to neutral variant.
+// state.smile is kept as `false` because renderer.js buildSpriteKey
+// still consumes it.
+//
+// IMPORTANT: interest fields are NEVER rendered on any surface
+// (phone preview, collective wall, hardware LCD). They only feed
+// compute_match() on the server. The bottom row of the preview is
+// the nickname slot, not an interest row.
 //
 // Animation model (ported back from hello-stranger):
-//   - OUTER key (sex/color/num/smile) = WHICH sprite — set by user, stable.
-//   - INNER pointer (animFrame)       = WHICH FRAME of that sprite — ticks
-//     on a setInterval, cycling through frames[animFrame % frames.length].
-//     This produces subtle detail changes (blink, mouth twitch, chest
-//     "breathing" symbol) without ever swapping the whole figure.
+//   - OUTER key (sex/color/num/smile) = WHICH sprite — stable.
+//   - INNER pointer (animFrame) = WHICH FRAME of that sprite — ticks
+//     on a setInterval. Subtle blink / mouth / breathing detail.
 // =============================================================
 
 import { renderProfile, applyToDOM, buildSpriteKey } from "./renderer.js";
-import { connectUI, sendState } from "./device.js";
 
 // ---- Hidden animation parameter (not in UI) -----------------
-// 1000/6 ≈ 166ms was hello-stranger's frameRate. Tune here if the
-// breathing feels too fast/slow. Do NOT expose to end users —
-// a stable tempo is part of the aesthetic.
 const ANIM_INTERVAL_MS = 166;
 
+// v12: true empty state — required fields start as null so the UI can
+// render a placeholder instead of preselecting defaults. bg_level keeps
+// a numeric default because the slider thumb has to physically rest
+// somewhere; `touched.color` is the source of truth for "user decided
+// on a color", not bg_level's value.
 const state = {
-  sex: "male",
-  color: 0,         // 0..4 — sprite row in the 5×3 Q_AVATAR gallery
-  num: 0,           // 0..2 — sprite column. USER-LOCKED; animation never touches this.
-                    // color + num together are set atomically by one tile click (v6).
-  smile: false,     // v5: user-picked independent dim (was mood-derived in v4)
-  mood: 0,          // vibe tag; no longer drives anything in v5+
-  bg_level: 2,
+  sex: null,        // null until user clicks female/male pill
+  color: null,      // null until user clicks an avatar tile
+  num: null,        // null until user clicks an avatar tile
+  smile: false,     // dropped from UI since v10; buildSpriteKey still needs it
+  mood: null,       // null until user clicks a mood swatch
+  bg_level: 2,      // slider thumb must rest somewhere; touched.color is truth
   quote: "",
-  interests: [],    // v7: Q_INTERESTS — up to 3 primary tag values.
-                    // Sent to device (icon+label) for hardware tag row.
-  interest_details: {},  // v8: Q_INTERESTS_DETAIL — { primary: [subtag, ...] }.
-                         // Collected for the collective-view similarity layout
-                         // ONLY. Never rendered on phone preview, hardware
-                         // LCD, or wall. Excluded from syncDevice() payload.
+  nickname: "",
+  interests: [],
+  interest_details: {},
 };
+
+// v12: touched lifted from field-level to accordion-group-level. The UI
+// shows two required accordions ("pick your look", "pick a background
+// color"); each contains multiple fields. Touching ANY field inside a
+// group marks the whole group touched. Mirrors what the user sees.
+//
+// v13: added an interest requirement (≥1 tag picked). interest lives
+// on a separate tab, so it's checked via state.interests.length rather
+// than a touched flag — having picked then unpicked still counts as "0".
+const touched = {
+  look:  false,     // sex pill OR avatar tile clicked
+  color: false,     // mood swatch clicked OR brightness slider dragged
+};
+
+// v14: requirements grouped by wizard step. Step 1 gates the "next"
+// button; step 2 gates the "submit" button. Order within a group
+// determines which accordion gets highlighted on a failed gate.
+const STEP1_REQS = [
+  { key: "interest", test: () => state.interests.length > 0 },
+];
+const STEP2_REQS = [
+  { key: "look",  test: () => touched.look,  acc: "form"  },
+  { key: "color", test: () => touched.color, acc: "color" },
+];
+
+function firstUnmet(reqs) {
+  for (const r of reqs) {
+    if (!r.test()) return r;
+  }
+  return null;
+}
 const MAX_INTERESTS = 3;
 
-// Internal animation pointer — NOT part of user state. Ticks on setInterval.
-// Used by renderer.js to pick frames[animFrame % frames.length].
+// Internal animation pointer — NOT part of user state.
 let animFrame = 0;
 
-const ENERGY_LABELS = ["empty", "low", "medium", "steady", "high", "electric"];
+// URL-driven sticker binding. Captured once on boot from ?sticker=N
+// in the URL. Used by buildSubmitPayload to attach sticker to /submit.
+// Replaces the deleted Q_STICKER dropdown.
+let _urlSticker = null;
 
-// Heart-rate → energy mapping (firmware reports BPM via {"hr":N} on serial).
-// Tuned for "person sitting calmly" rather than gym/cardio: the medium band
-// (70-85 BPM) covers a typical resting adult, giving the avatar a stable
-// "default" color when no excitement happens.
-//
-// 0 = no signal (finger lifted) — leaves bg_level at last user-set value.
-function bpmToEnergy(bpm) {
-  if (bpm <= 0)   return null;     // no signal → don't override
-  if (bpm < 60)   return 0;        // empty    — deep relaxation
-  if (bpm < 70)   return 1;        // low      — quiet
-  if (bpm < 85)   return 2;        // medium   — typical resting
-  if (bpm < 100)  return 3;        // steady   — mildly active
-  if (bpm < 115)  return 4;        // high     — excited
-  return 5;                        // electric — strong / running
-}
-
-// Most recent BPM reported by device. Null = no reading yet (or finger
-// lifted). UI uses this to show the "♥ 78 bpm" readout.
-let lastBpm = null;
+// v14: replaced tabs with a 2-step wizard. currentStep is 1 (interest)
+// or 2 (avatar). Persisted to sessionStorage so refresh lands on the
+// step the user was last on.
+let currentStep = 1;
 
 let sprites = null;
 let colors = null;
@@ -112,36 +125,31 @@ async function loadData() {
 // -------------------------------------------------------------
 // DOM population (from questions.json)
 // -------------------------------------------------------------
-function renderRadioGroup(containerId, radioName, options, currentValue) {
-  const container = document.getElementById(containerId);
-  container.innerHTML = options.map(opt => `
-    <label class="choice">
-      <input type="radio" name="${radioName}" value="${opt.value}"
-             ${String(opt.value) === String(currentValue) ? "checked" : ""}>
-      <span>${opt.label}</span>
-    </label>
-  `).join("");
-}
-
-// Cheap HTML-escape for sprite frames. Current sprites.json uses only
-// Unicode geometric / box-drawing chars, but guard against future edits
-// that might include <, >, or &.
 function escapeHtml(s) {
   return s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 }
 
-// Q_AVATAR (v6): 15-tile visual gallery per sex. Tiles are derived from
-// sprite keys at runtime — questions.json Q_AVATAR has no options array.
-// A tile carries data-color + data-num; click sets both state fields.
+// Q_AVATAR: 15-tile visual gallery per sex.
+// v12: when sex is null (user hasn't picked yet) show a placeholder card
+// instead of the grid — sprites can't be resolved without a sex prefix.
 function populateAvatarGallery() {
   const container = document.getElementById("opts-avatar");
+  if (state.sex === null) {
+    container.innerHTML =
+      `<div class="gallery-placeholder">pick female or male above to see avatars</div>`;
+    return;
+  }
   const tiles = [];
   for (let color = 0; color < 5; color++) {
     for (let num = 0; num < 3; num++) {
       const key = buildSpriteKey({ sex: state.sex, color, num, smile: false });
       const frames = sprites && sprites[key];
       const firstFrame = frames && frames.length ? frames[0] : "(missing)";
-      const isSelected = color === state.color && num === state.num;
+      // v12: null state.color/num → no tile is preselected.
+      const isSelected = state.color !== null
+                      && state.num !== null
+                      && color === state.color
+                      && num === state.num;
       tiles.push(
         `<button type="button" class="avatar-tile${isSelected ? " selected" : ""}"`
         + ` role="radio" aria-checked="${isSelected}"`
@@ -155,12 +163,25 @@ function populateAvatarGallery() {
   container.innerHTML = tiles.join("");
 }
 
-function populateSmile() {
-  renderRadioGroup("opts-smile", "smile", questions.Q_SMILE.options, state.smile);
-}
-
+// Q_MOOD_BG (v10): 5 hue swatches, anonymized — no chill/curious/playful
+// labels. The color itself is the choice. Anchor hex per hue comes from
+// colors.palette[mood][3] (the "steady" cell — the most representative
+// brightness for showing what a hue family looks like).
 function populateMood() {
-  renderRadioGroup("opts-mood", "mood", questions.Q_MOOD.options, state.mood);
+  const container = document.getElementById("opts-mood");
+  if (!container || !colors) return;
+  const opts = questions.Q_MOOD.options;
+  container.innerHTML = opts.map(opt => {
+    const anchor = colors.palette[String(opt.value)]?.["3"]?.hex || "#888";
+    // v12: null state.mood → no swatch is preselected.
+    const isSelected = state.mood !== null && Number(opt.value) === state.mood;
+    return `<button type="button"
+              class="mood-swatch${isSelected ? " selected" : ""}"
+              role="radio" aria-checked="${isSelected}"
+              data-mood="${opt.value}"
+              style="background:${anchor}"
+              aria-label="background hue ${opt.value}"></button>`;
+  }).join("");
 }
 
 function populateQuoteSuggestions() {
@@ -170,8 +191,6 @@ function populateQuoteSuggestions() {
   `).join("");
 }
 
-// Q_INTERESTS (v7): multi-select tag picker, max 3.
-// Each tag is a toggle button; we track selection in state.interests.
 function populateInterests() {
   const container = document.getElementById("opts-interests");
   const opts = questions.Q_INTERESTS.options;
@@ -189,14 +208,10 @@ function populateInterests() {
 // -------------------------------------------------------------
 // Subtle in-sprite animation loop
 // -------------------------------------------------------------
-// Ticks animFrame on a fixed interval. state.num (pose) is never touched.
-// renderer.js reads animFrame and picks frames[animFrame % frames.length],
-// so each tick flips to the next micro-variant (blink / mouth / breathing)
-// within the user-locked sprite.
 function startAnimation() {
   if (animationTimer !== null) return;
   animationTimer = setInterval(() => {
-    animFrame = (animFrame + 1) >>> 0;  // unsigned overflow-safe increment
+    animFrame = (animFrame + 1) >>> 0;
     rerender();
   }, ANIM_INTERVAL_MS);
 }
@@ -205,182 +220,170 @@ function startAnimation() {
 // -------------------------------------------------------------
 // Render (single source of UI truth)
 // -------------------------------------------------------------
+// v12: three-stage preview reveal.
+//   stage 1 — !touched.look  → grey block + guidance line, no avatar drawn
+//   stage 2 — look touched, !color → ascii avatar drawn, grey-neutral palette
+//   stage 3 — both touched   → ascii avatar drawn, full mood/bg palette
+// The stages map directly to the two required accordions; each user
+// decision visibly reveals more of the avatar.
 function rerender() {
+  const previewFrame = document.getElementById("preview-frame");
+  const pre = document.getElementById("avatar-pre");
+  const placeholder = document.getElementById("preview-placeholder");
+  const bubble = document.getElementById("quote-bubble");
+
+  // v13.8: placeholder when ANY of sex/color/num is null — not just when
+  // touched.look is false. Previously a user could touch the look group
+  // (e.g. click sex but not a tile) and leave state.color/num as null;
+  // rerender would then call buildSpriteKey("female_null_null"), get a
+  // sprites[key]=undefined miss, and applyToDOM would write "(sprite
+  // missing)" into avatar-pre. Guarding on the actual data avoids that.
+  const needsPlaceholder = state.sex === null
+                        || state.color === null
+                        || state.num === null;
+
+  if (needsPlaceholder) {
+    if (previewFrame) previewFrame.classList.add("placeholder-mode");
+    if (pre) pre.style.display = "none";
+    if (placeholder) {
+      placeholder.style.display = "flex";
+      placeholder.textContent = "pick a body to begin";
+    }
+    if (bubble) bubble.hidden = true;
+    return;
+  }
+
+  // Stage 2 / 3: avatar drawn. Color path depends on touched.color.
+  if (previewFrame) previewFrame.classList.remove("placeholder-mode");
+  if (pre) pre.style.display = "";
+  if (placeholder) placeholder.style.display = "none";
+
   try {
-    lastRendered = renderProfile(state, sprites, colors, animFrame);
+    const opts = { neutral: !touched.color };
+    lastRendered = renderProfile(state, sprites, colors, animFrame, opts);
     applyToDOM(lastRendered);
+    renderPreviewNickname();
   } catch (err) {
     console.error("render error:", err);
-    document.getElementById("avatar-pre").textContent =
-      `ERR: ${err.message}`;
+    if (pre) pre.textContent = `ERR: ${err.message}`;
     lastRendered = null;
   }
 }
 
-// Push current state to the device. Call after user-driven state changes
-// only — NOT from the animation loop. The 166ms breathing is a browser-
-// only visual detail; the device cycles its own animFrame locally.
-//
-// Wire-format field name is `energy`, not `bg_level` — a holdover from an
-// earlier prototype. Translate here rather than renaming the UI state.
-function syncDevice() {
-  // Persist to sessionStorage on every user-driven state change, so an
-  // accidental refresh restores the in-progress profile. Submit clears it.
-  saveSessionState();
-  sendState({
-    sex:    state.sex,
-    color:  state.color,
-    num:    state.num,
-    smile:  state.smile,
-    mood:   state.mood,
-    energy: state.bg_level,
-    quote:  state.quote,
-    interests: buildInterestsPayload(),
-  });
+// Replaces the v9 renderPreviewInterests. The bottom slot of the
+// preview frame now shows the user's nickname (if any) — interest
+// is intentionally not rendered on any surface.
+function renderPreviewNickname() {
+  const row = document.getElementById("preview-nickname");
+  if (!row) return;
+  const nick = (state.nickname || "").trim();
+  if (!nick) {
+    row.textContent = "";
+    row.classList.remove("visible");
+    return;
+  }
+  row.textContent = nick;
+  row.classList.add("visible");
 }
 
-// Resolve state.interests (array of value strings) into the {icon,label}
-// objects the device needs. Sending the icon char directly keeps the
-// firmware free of any value→icon mapping table — questions.json stays
-// the single source of truth.
-function buildInterestsPayload() {
-  if (!state.interests.length || !questions) return [];
-  const byValue = new Map(questions.Q_INTERESTS.options.map(o => [o.value, o]));
-  return state.interests
-    .map(v => byValue.get(v))
-    .filter(Boolean)
-    .map(o => ({ icon: o.icon, label: o.label }));
+// v10: no more browser→device push. Device pulls profile from server
+// via HTTP poll. The only side effect on state change is persisting
+// the in-progress draft to sessionStorage so an accidental refresh
+// doesn't lose the user's choices.
+function persistDraft() {
+  saveSessionState();
+  // v13/v14: every user action that's worth saving also triggers a
+  // button-state refresh. Single chokepoint — every wire* gets it free.
+  updateWizardButtons();
+}
+
+// Update the energy slider's CSS gradient track based on current mood.
+// Called on boot and every time state.mood changes.
+function updateEnergySliderGradient() {
+  const slider = document.getElementById("slider-energy");
+  if (!slider || !colors) return;
+  const row = colors.palette[String(state.mood)];
+  if (!row) return;
+  const stops = ["0","1","2","3","4","5"].map(k => row[k].hex).join(", ");
+  slider.style.background = `linear-gradient(to right, ${stops})`;
 }
 
 
 // -------------------------------------------------------------
 // Event wiring
 // -------------------------------------------------------------
-function wireSex() {
-  document.querySelectorAll('input[name="sex"]').forEach(r => {
-    r.addEventListener("change", () => {
-      if (r.checked) {
-        state.sex = r.value;
-        // Rebuild the 15 thumbnails with the new sex prefix. The selected
-        // (color, num) indices are preserved — user's "that one" pick
-        // lands on the same grid cell for the other sex.
-        populateAvatarGallery();
-        rerender();
-        syncDevice();
-      }
+// v11: sex is rendered as two capsule pills (female first, then male).
+// Click toggles state.sex and re-renders the 15-tile gallery so users
+// see only the body variant they picked.
+function wireSexPills() {
+  const container = document.getElementById("opts-sex");
+  if (!container) return;
+  container.addEventListener("click", (e) => {
+    const pill = e.target.closest(".pill");
+    if (!pill) return;
+    state.sex = pill.dataset.sex;
+    touched.look = true;
+    container.querySelectorAll(".pill").forEach(p => {
+      const isThis = p === pill;
+      p.classList.toggle("active", isThis);
+      p.setAttribute("aria-checked", isThis ? "true" : "false");
     });
+    populateAvatarGallery();
+    rerender();
+    persistDraft();
   });
 }
 
-// Q_AVATAR (v6): click on a tile → set both state.color and state.num
-// atomically. wireDelegated is designed for single-field radio groups;
-// a compound-value gallery gets its own handler.
 function wireAvatarGallery() {
   document.getElementById("opts-avatar").addEventListener("click", (e) => {
     const tile = e.target.closest(".avatar-tile");
     if (!tile) return;
     state.color = Number(tile.dataset.color);
     state.num = Number(tile.dataset.num);
+    touched.look = true;
     document.querySelectorAll("#opts-avatar .avatar-tile").forEach(t => {
       const isThis = t === tile;
       t.classList.toggle("selected", isThis);
       t.setAttribute("aria-checked", isThis ? "true" : "false");
     });
     rerender();
-    syncDevice();
+    persistDraft();
   });
 }
 
-function wireDelegated(containerId, radioName, field, coerce = Number, onAfter) {
-  document.getElementById(containerId).addEventListener("change", (e) => {
-    if (e.target.name === radioName) {
-      state[field] = coerce(e.target.value);
-      if (typeof onAfter === "function") onAfter();
-      rerender();
-      syncDevice();
-    }
+// Q_MOOD_BG swatches (v10): click a hue → set state.mood, rebuild the
+// gradient on the brightness slider, repaint.
+function wireMoodSwatches() {
+  const container = document.getElementById("opts-mood");
+  if (!container) return;
+  container.addEventListener("click", (e) => {
+    const sw = e.target.closest(".mood-swatch");
+    if (!sw) return;
+    state.mood = Number(sw.dataset.mood);
+    touched.color = true;
+    document.querySelectorAll("#opts-mood .mood-swatch").forEach(s => {
+      const isThis = s === sw;
+      s.classList.toggle("selected", isThis);
+      s.setAttribute("aria-checked", isThis ? "true" : "false");
+    });
+    updateEnergySliderGradient();
+    rerender();
+    persistDraft();
   });
 }
-
-// Smile radio values come in as strings "true"/"false"; coerce to bool.
-const toBool = (v) => v === "true" || v === true;
 
 function wireEnergy() {
   const slider = document.getElementById("slider-energy");
-  const label = document.getElementById("slider-energy-label");
+  if (!slider) return;
   const handler = () => {
     state.bg_level = Number(slider.value);
-    label.textContent = ENERGY_LABELS[state.bg_level] ?? "—";
+    touched.color = true;
     rerender();
-    syncDevice();
+    persistDraft();
   };
   slider.addEventListener("input", handler);
-  handler();
 }
 
-// Called every time firmware reports {"hr":N} (~1 Hz). Maps BPM to a
-// 0-5 energy bucket and pushes it through the same path as a slider drag.
-// When bpm=0 (no finger) we leave bg_level alone so the avatar doesn't
-// flicker between "no signal" and "low".
-function handleHeartRate(bpm) {
-  lastBpm = bpm;
-  updateHeartRateReadout();
-  const energy = bpmToEnergy(bpm);
-  if (energy === null) return;
-  if (energy === state.bg_level) return;          // no-op, skip rerender
-  state.bg_level = energy;
-  const slider = document.getElementById("slider-energy");
-  const label  = document.getElementById("slider-energy-label");
-  if (slider) slider.value = String(energy);
-  if (label)  label.textContent = ENERGY_LABELS[energy] ?? "—";
-  rerender();
-  syncDevice();
-}
-
-// Render the "♥ 78 bpm · medium" readout (or "no finger detected"), and
-// flip the slider between editable (no signal) and read-only (sensor live).
-// The slider stays a manual fallback so demos without hardware keep working.
-function updateHeartRateReadout() {
-  const el = document.getElementById("hr-readout");
-  const slider = document.getElementById("slider-energy");
-  const live = (lastBpm !== null && lastBpm > 0);
-  if (el) {
-    if (!live) {
-      el.textContent = "♥ — no signal";
-      el.classList.remove("active");
-    } else {
-      const lvl = ENERGY_LABELS[bpmToEnergy(lastBpm) ?? 2] ?? "—";
-      el.textContent = `♥ ${lastBpm} bpm · ${lvl}`;
-      el.classList.add("active");
-    }
-  }
-  if (slider) slider.disabled = live;
-}
-
-// Rebuild the preview's interest row from state.interests.
-// Called after any selection change in wireInterests, and once on boot.
-// Format: "music · film · food" — hidden when empty. Label-only to
-// match the hardware (E-Ink + LCD) renderer, which prints text only.
-function renderPreviewInterests() {
-  const row = document.getElementById("preview-interests");
-  if (!row) return;
-  if (!state.interests.length || !questions) {
-    row.innerHTML = "";
-    row.classList.remove("visible");
-    return;
-  }
-  const byValue = new Map(questions.Q_INTERESTS.options.map(o => [o.value, o]));
-  const parts = state.interests
-    .map(v => byValue.get(v))
-    .filter(Boolean)
-    .map(o => `<span class="preview-interest">${o.label}</span>`);
-  row.innerHTML = parts.join('<span class="preview-interest-sep">·</span>');
-  row.classList.add("visible");
-}
-
-// Q_INTERESTS: click a tag to toggle; enforce MAX_INTERESTS.
-// When selection is full, a 4th click doesn't add — it shows a hint
-// asking the user to deselect one first.
 function wireInterests() {
   const container = document.getElementById("opts-interests");
   const hint = document.getElementById("interests-hint");
@@ -403,16 +406,13 @@ function wireInterests() {
     const idx = state.interests.indexOf(value);
 
     if (idx !== -1) {
-      // Already selected → deselect.
       state.interests.splice(idx, 1);
       tag.classList.remove("selected");
       tag.setAttribute("aria-checked", "false");
       hint.classList.remove("visible");
       hint.textContent = "";
     } else {
-      // Not yet selected.
       if (state.interests.length >= MAX_INTERESTS) {
-        // Already at max — block and prompt.
         showHint(`max ${MAX_INTERESTS} — tap one to free a slot`);
         return;
       }
@@ -420,26 +420,17 @@ function wireInterests() {
       tag.classList.add("selected");
       tag.setAttribute("aria-checked", "true");
     }
-    renderPreviewInterests();
-    syncDevice();
+    persistDraft();
     renderInterestSubtags();
+    updateWizardButtons();
   });
 }
 
-// Q_INTERESTS_DETAIL (v8): for each currently-selected primary interest,
-// render a row of pill buttons with that primary's subtags. Toggling a
-// pill updates state.interest_details[primary]. Subtag selection is
-// optional (zero-or-more), so there's no max-cap or hint.
-//
-// The whole fieldset hides when no primary is selected. When a primary
-// is deselected we also drop its detail entry to keep state.interest_details
-// in sync with state.interests.
 function renderInterestSubtags() {
   const fs = document.getElementById("qblock-subtags");
   const container = document.getElementById("opts-subtags");
   if (!fs || !container || !questions) return;
 
-  // Drop entries for primaries that are no longer selected.
   for (const k of Object.keys(state.interest_details)) {
     if (!state.interests.includes(k)) delete state.interest_details[k];
   }
@@ -489,18 +480,17 @@ function wireInterestSubtags() {
       pill.classList.add("selected");
       pill.setAttribute("aria-pressed", "true");
     }
-    // Subtags are NOT sent to device or rendered in preview — collective
-    // view consumes them on submit. No syncDevice / rerender needed.
     saveSessionState();
   });
 }
 
 function wireQuote() {
   const input = document.getElementById("input-quote");
+  if (!input) return;
   input.addEventListener("input", () => {
     state.quote = input.value;
     rerender();
-    syncDevice();
+    persistDraft();
   });
 
   document.getElementById("quote-suggestions")
@@ -511,32 +501,106 @@ function wireQuote() {
       input.value = s;
       state.quote = s;
       rerender();
-      syncDevice();
+      persistDraft();
     });
 }
 
+function wireNickname() {
+  const input = document.getElementById("input-nickname");
+  if (!input) return;
+  input.addEventListener("input", () => {
+    state.nickname = input.value;
+    renderPreviewNickname();
+    persistDraft();
+  });
+}
+
 
 // -------------------------------------------------------------
-// Persistence — sessionStorage keeps the in-progress profile across
-// accidental refreshes. Cleared once a successful /submit happens so
-// the next visitor on the same phone gets a fresh form.
+// Tab switching — two parallel panels, free to switch.
 // -------------------------------------------------------------
-const SESSION_KEY = "xy_profile_v8";
+// v14: switch to step n (1 or 2). Always scrolls to top so the user
+// sees the new step's first field, not whatever the previous step's
+// scroll position was.
+function showStep(n) {
+  if (n !== 1 && n !== 2) n = 1;
+  currentStep = n;
+  document.querySelectorAll(".step-panel").forEach(el => {
+    el.hidden = String(n) !== el.dataset.step;
+  });
+  document.querySelectorAll(".step-dot").forEach(dot => {
+    const dn = Number(dot.dataset.stepDot);
+    dot.classList.toggle("active", dn === n);
+    dot.classList.toggle("done",   dn < n);
+  });
+  window.scrollTo({ top: 0, behavior: "instant" });
+  saveSessionState();
+  updateWizardButtons();
+}
+
+function wireStepNav() {
+  document.getElementById("btn-back")?.addEventListener("click", () => {
+    showStep(currentStep - 1);
+  });
+  document.getElementById("btn-next")?.addEventListener("click", () => {
+    const blocked = firstUnmet(STEP1_REQS);
+    if (blocked) {
+      // Step 1 incomplete — scroll to the interest grid so the user
+      // sees what's missing. interests-hint already lights up if they
+      // try to pick a 4th, but here they haven't picked any.
+      const grid = document.getElementById("opts-interests");
+      grid?.scrollIntoView({ behavior: "smooth", block: "start" });
+      // Flash the fieldset with the invalid class for a moment.
+      const fs = document.querySelector('fieldset[data-q="Q_INTERESTS"]');
+      if (fs) {
+        fs.classList.add("invalid");
+        setTimeout(() => fs.classList.remove("invalid"), 1600);
+      }
+      return;
+    }
+    showStep(2);
+  });
+}
+
+
+// -------------------------------------------------------------
+// Persistence
+// -------------------------------------------------------------
+// v14: bumped from v12 because currentTab → currentStep (int) — old
+// "avatar"/"interest" string would re-hydrate as undefined and silently
+// reset the wizard to step 1, which is correct anyway but cleaner to
+// skip outright.
+const SESSION_KEY = "xy_profile_v14";
 
 function saveSessionState() {
-  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(state)); }
-  catch (_) { /* quota/permission — ignore */ }
+  try {
+    sessionStorage.setItem(
+      SESSION_KEY,
+      JSON.stringify({ ...state, currentStep, touched })
+    );
+  } catch (_) { /* quota/permission — ignore */ }
 }
 
 function loadSessionState() {
+  // v14: evict older schema leftovers so refresh lands cleanly.
+  try { sessionStorage.removeItem("xy_profile_v11"); } catch (_) {}
+  try { sessionStorage.removeItem("xy_profile_v12"); } catch (_) {}
   try {
     const raw = sessionStorage.getItem(SESSION_KEY);
     if (!raw) return;
     const saved = JSON.parse(raw);
-    // Whitelisted merge: only restore known fields, skip anything else
-    // so a stale schema can't corrupt current state.
-    for (const k of ["sex","color","num","smile","mood","bg_level","quote","interests","interest_details"]) {
+    for (const k of ["sex","color","num","mood","bg_level","quote","nickname","interests","interest_details"]) {
       if (k in saved) state[k] = saved[k];
+    }
+    if (saved.currentStep === 1 || saved.currentStep === 2) {
+      currentStep = saved.currentStep;
+    }
+    if (saved.touched && typeof saved.touched === "object") {
+      // Object.keys(touched) is {look, color} in v12; any v11 keys
+      // (sex/avatar/mood/bg_level) in saved.touched are ignored.
+      for (const k of Object.keys(touched)) {
+        if (typeof saved.touched[k] === "boolean") touched[k] = saved.touched[k];
+      }
     }
   } catch (_) { /* malformed — ignore */ }
 }
@@ -547,59 +611,107 @@ function clearSessionState() {
 
 
 // -------------------------------------------------------------
-// Submit — POST current full state (incl. interest_details) to the
-// Flask backend. Disable the button on success to block accidental
-// double submits; sessionStorage is wiped so a refresh after submit
-// doesn't reload the same profile.
+// Sticker binding from URL — replaces the deleted Q_STICKER dropdown.
+// Each station's LCD shows its own QR code with ?sticker=N in the URL.
+// Scanning that QR is what tells the server which device to push the
+// profile to. There's no manual fallback anymore — if a user lands on
+// /index.html directly, the submission only goes to the wall.
 // -------------------------------------------------------------
-// In the next-gen deployment each station's LCD shows its own QR code
-// pointing at /?sticker=N. Scanning bypasses the manual "which sticker"
-// dropdown — sticker identity is implicit in the URL the user landed on.
-// If the URL has ?sticker=N, write it into the select and hide the whole
-// question block; otherwise leave the dropdown visible (today's flow).
 function applyUrlSticker() {
   const params = new URLSearchParams(window.location.search);
   const raw = params.get("sticker");
   if (!raw) return;
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 1 || n > 5) return;
-  const select = document.getElementById("input-sticker");
-  const block  = document.querySelector('[data-q="Q_STICKER"]');
-  if (!select || !block) return;
-  select.value = String(n);
-  block.style.display = "none";
+  _urlSticker = n;
+}
+
+
+// -------------------------------------------------------------
+// Submit
+// -------------------------------------------------------------
+// v14: wizard buttons. The dock shows different buttons per step:
+//   step 1 → [next →]    (disabled until step 1 reqs met)
+//   step 2 → [← back] [submit]   (submit disabled until step 2 reqs met)
+// Back is always enabled. Disabled buttons stay clickable so we can
+// scroll the user to whatever's missing (better than dead clicks).
+function updateWizardButtons() {
+  const back = document.getElementById("btn-back");
+  const next = document.getElementById("btn-next");
+  const submit = document.getElementById("btn-submit");
+  if (!back || !next || !submit) return;
+
+  if (currentStep === 1) {
+    back.hidden = true;
+    next.hidden = false;
+    submit.hidden = true;
+    const blocked = firstUnmet(STEP1_REQS);
+    if (blocked) {
+      next.dataset.unmet = blocked.key;
+    } else {
+      delete next.dataset.unmet;
+    }
+  } else {
+    back.hidden = false;
+    next.hidden = true;
+    submit.hidden = false;
+    const blocked = firstUnmet(STEP2_REQS);
+    if (blocked) {
+      submit.dataset.unmet = blocked.key;
+    } else {
+      delete submit.dataset.unmet;
+    }
+  }
+}
+
+// v11/v14: open the accordion identified by data-acc + scroll to it.
+// Renamed from focusAccordionStep to free up "step" for wizard concepts.
+function focusAccordion(name) {
+  const acc = document.querySelector(`.acc[data-acc="${name}"]`);
+  if (!acc) return;
+  acc.open = true;
+  acc.classList.add("invalid");
+  setTimeout(() => acc.classList.remove("invalid"), 1600);
+  acc.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function wireSubmit() {
-  applyUrlSticker();
   const btn = document.getElementById("btn-submit");
   const status = document.getElementById("submit-status");
   if (!btn || !status) return;
 
-  // Match what the backend stores. Mirrors syncDevice() field set
-  // PLUS interest_details, which the device doesn't get. The optional
-  // sticker number tells the server to also bind this submission to a
-  // STAGE3_USERS slot so my ESP32 tap reads the DIY data; an empty value
-  // keeps the legacy "wall only" behavior.
+  // v12/v13: belt-and-suspenders fill. firstUnmetRequirement() blocks
+  // submits where required groups are untouched, so by the time this
+  // runs we know touched.look + touched.color are both true and
+  // state.interests has at least one entry. Null-coalescing here is
+  // defense against a hypothetical logic bug leaking null to the server.
   const buildSubmitPayload = () => {
-    const stickerEl = document.getElementById("input-sticker");
-    const stickerVal = stickerEl ? stickerEl.value : "";
     const payload = {
-      sex:               state.sex,
-      color:             state.color,
-      num:               state.num,
-      smile:             state.smile,
-      mood:              state.mood,
+      sex:               state.sex      ?? "female",
+      color:             state.color    ?? 0,
+      num:               state.num      ?? 0,
+      smile:             state.smile,        // always false since v10
+      mood:              state.mood     ?? 0,
       bg_level:          state.bg_level,
       quote:             state.quote,
+      nickname:          state.nickname,
       interests:         state.interests,
       interest_details:  state.interest_details,
     };
-    if (stickerVal) payload.sticker = Number(stickerVal);
+    if (_urlSticker !== null) payload.sticker = _urlSticker;
     return payload;
   };
 
   btn.addEventListener("click", async () => {
+    // v14: submit only fires on step 2. Even if step 2 reqs aren't met,
+    // the button is still clickable — we scroll to the missing accordion
+    // instead of doing nothing.
+    const blocked = firstUnmet(STEP2_REQS);
+    if (blocked) {
+      focusAccordion(blocked.acc);
+      return;
+    }
+
     btn.disabled = true;
     status.className = "submit-status";
     status.textContent = "submitting…";
@@ -612,12 +724,8 @@ function wireSubmit() {
       });
       if (!res.ok) throw new Error(`server replied ${res.status}`);
       status.className = "submit-status success";
-      status.textContent = "submitted ✓ check the wall";
+      status.textContent = "submitted ✓";
       clearSessionState();
-      // Re-enable the button so users can adjust + re-submit. Repeated
-      // submissions append to the collective wall (and overwrite the
-      // STAGE3_USERS slot if a sticker was selected) — that's acceptable
-      // for the demo and necessary for iterative testing.
       btn.disabled = false;
     } catch (err) {
       console.error(err);
@@ -635,50 +743,50 @@ function wireSubmit() {
 async function main() {
   try {
     await loadData();
-
-    // Restore in-progress profile from sessionStorage BEFORE populating any
-    // selected/highlighted UI so initial DOM reflects the restored state.
+    applyUrlSticker();
     loadSessionState();
 
     populateAvatarGallery();
-    populateSmile();
     populateMood();
     populateInterests();
     populateQuoteSuggestions();
 
-    // Restore quote input value if state has one (other UI repaints itself
-    // via the next rerender + populate* paths).
+    // v12: sync sex pill selection to restored state.sex. When sex is
+    // null (fresh visit), neither pill is highlighted — both stay in
+    // the default "unselected" appearance.
+    document.querySelectorAll("#opts-sex .pill").forEach(p => {
+      const isThis = state.sex !== null && p.dataset.sex === state.sex;
+      p.classList.toggle("active", isThis);
+      p.setAttribute("aria-checked", isThis ? "true" : "false");
+    });
+
+    // Restore text inputs from state
     const quoteInput = document.getElementById("input-quote");
     if (quoteInput && state.quote) quoteInput.value = state.quote;
+    const nicknameInput = document.getElementById("input-nickname");
+    if (nicknameInput && state.nickname) nicknameInput.value = state.nickname;
 
-    wireSex();
+    // Restore energy slider position
+    const slider = document.getElementById("slider-energy");
+    if (slider) slider.value = String(state.bg_level);
+
+    wireStepNav();            // v14: wizard back/next handlers
+    wireSexPills();
     wireAvatarGallery();
-    wireDelegated("opts-smile", "smile", "smile", toBool);
-    wireDelegated("opts-mood",  "mood",  "mood");
+    wireMoodSwatches();
     wireEnergy();
     wireInterests();
     wireInterestSubtags();
-    renderInterestSubtags();   // populates from restored state.interests
-    renderPreviewInterests();  // restored primaries reflect on preview row
+    renderInterestSubtags();
     wireQuote();
+    wireNickname();
     wireSubmit();
 
-    // USB Serial connect button. Once connected, the device:connected
-    // event flushes current state, so the board doesn't stay stuck on
-    // its boot "waiting..." screen even if the user doesn't touch anything.
-    connectUI();
-    window.addEventListener("device:connected", syncDevice);
-
-    // Heart rate from device → drives bg_level (energy). The slider UI
-    // becomes a read-only readout when a BPM is being received.
-    window.addEventListener("device:message", (e) => {
-      const msg = e.detail;
-      if (typeof msg.hr === "number") handleHeartRate(msg.hr);
-    });
-
+    showStep(currentStep);    // v14: enter saved step (defaults to 1)
+    updateEnergySliderGradient();
+    updateWizardButtons();    // v14: prime button states from restored state
     startAnimation();
     rerender();
-    syncDevice();
   } catch (err) {
     console.error(err);
     document.getElementById("avatar-pre").textContent =

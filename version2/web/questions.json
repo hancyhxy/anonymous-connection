@@ -21,15 +21,6 @@
     "fields": ["color", "num"],
     "note": "v6: replaces Q_LOOK + Q_POSE. Renders as a 15-tile visual gallery (5 × 3) per sex. Tiles are derived from sprites.json keys at runtime — no options array here. Click a tile to set state.color (0..4) and state.num (0..2) atomically. The 15 sprites are independent hand-drawn illustrations, NOT a composable look×pose matrix."
   },
-  "Q_SMILE": {
-    "prompt": "Smile?",
-    "field": "smile",
-    "note": "v5: smile is now an independent user dimension (was mood-derived in v4). Completes the 2×5×3×2=60 sprite combination matrix from hello-stranger. Falls back to neutral sprite if no smile variant exists for the chosen sex/look/pose.",
-    "options": [
-      { "value": false, "label": "neutral" },
-      { "value": true,  "label": "smile"   }
-    ]
-  },
   "Q_MOOD": {
     "prompt": "How do you feel right now?",
     "field": "mood",
@@ -90,5 +81,12 @@
       "daydreaming",
       "same vibe?"
     ]
+  },
+  "Q_NICKNAME": {
+    "prompt": "How would you like others to see you?",
+    "field": "nickname",
+    "type": "text",
+    "maxLength": 12,
+    "note": "v10: optional. Replaces the old interest tag row on every surface (phone preview, collective wall, hardware LCD). Blank → nothing rendered in that slot. Interest fields are now matching-layer only and never rendered."
   }
 }

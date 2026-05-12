@@ -89,8 +89,10 @@ function ensureTile(user) {
   const pre = document.createElement("pre");
   el.appendChild(pre);
 
-  // Primary-interest row, mirrors web preview's #preview-interests.
-  // Subtags are intentionally NOT shown — only first-level icons/labels.
+  // Nickname row (v10) — sits in the slot the old interest tag row used
+  // to occupy. Class name kept as `.tile-interests` so existing CSS keeps
+  // working without a stylesheet rename. Interest is matching-layer only
+  // and never rendered on any surface (phone preview, wall, hardware).
   const tags = document.createElement("div");
   tags.className = "tile-interests";
   el.appendChild(tags);
@@ -120,34 +122,26 @@ function paintTile(user) {
     bubbleText.textContent = "";
     bubble.setAttribute("data-empty", "1");
   }
-  // Primary-interest tag row — same format as web preview
-  // (icon + label, " · " separator). Hidden when empty.
-  paintTileInterests(el, user);
+  // Bottom row of each tile (v10): nickname if set, else blank.
+  // Replaces the old interest tag row — interest is matching-layer
+  // only and is intentionally invisible on every surface.
+  paintTileNickname(el, user);
 }
 
-// Look up icons from questions.json (loaded once at boot) and render the
-// same "♪ music · ▶ film" string the web preview shows. Subtags from
-// user.profile.interest_details are deliberately ignored here.
-let _interestByValue = null;
-function paintTileInterests(el, user) {
+// Render user.profile.nickname (if any) in the slot the old interest
+// tag row used to occupy. Blank/missing nickname → empty + data-empty
+// attribute (consumed by CSS to hide / collapse the row).
+function paintTileNickname(el, user) {
   const tags = el.querySelector(".tile-interests");
   if (!tags) return;
-  const list = user.profile?.interests ?? [];
-  if (list.length === 0 || !questions) {
+  const nick = (user.profile?.nickname ?? "").trim();
+  if (!nick) {
     tags.innerHTML = "";
     tags.setAttribute("data-empty", "1");
     return;
   }
-  if (!_interestByValue) {
-    _interestByValue = new Map(
-      questions.Q_INTERESTS.options.map(o => [o.value, o])
-    );
-  }
-  const parts = list
-    .map(v => _interestByValue.get(v))
-    .filter(Boolean)
-    .map(o => `<span class="tile-interest">${o.label}</span>`);
-  tags.innerHTML = parts.join('<span class="tile-interest-sep">·</span>');
+  const safe = nick.replace(/[&<>]/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;" }[c]));
+  tags.innerHTML = `<span class="tile-nickname">${safe}</span>`;
   tags.removeAttribute("data-empty");
 }
 
