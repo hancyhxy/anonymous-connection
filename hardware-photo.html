@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Anonymous Connection — Hardware photo</title>
+<style>
+  /* Single-page hardware photograph with callout annotations. Same style
+     family as architecture-diagram.html (white card / orange accent /
+     Inter sans), but annotation system borrowed from the Vibe Radio DJ
+     hardware_technical.html — black dot + black line + soft pill label. */
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap');
+
+  :root {
+    --bg:            #efece6;   /* matches the photo's tabletop tone */
+    --card:          #ffffff;
+    --ink:           #1a1a1a;
+    --ink-soft:      rgba(0,0,0,0.45);
+    --line:          #e6e3dc;
+    --accent-orange: #f06b32;
+    --accent-coral:  #ffe2d4;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { background: var(--bg); }
+  body {
+    font-family: "Inter", "Helvetica Neue", -apple-system, system-ui, sans-serif;
+    color: var(--ink);
+    padding: 26px 0 30px;
+    -webkit-font-smoothing: antialiased;
+  }
+  /* Header text stays indented; photo bleeds full-width below it. */
+  .h-eyebrow,
+  h1 {
+    padding-left: 60px;
+    padding-right: 60px;
+  }
+
+  /* ─── Header ───────────────────────────────────── */
+  .h-eyebrow {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent-orange);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    border-top: 2px solid var(--accent-orange);
+    padding-top: 8px;
+    display: inline-block;
+    margin-bottom: 10px;
+  }
+  h1 {
+    font-size: 44px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin-bottom: 18px;
+  }
+  h1 em {
+    font-style: italic;
+    color: var(--accent-orange);
+  }
+
+  /* ─── Photo frame with annotations ─────────────── */
+  /* Seamless mode: no frame, no padding, no border-radius — the photo
+     blends straight into the page background, which is tinted to match
+     the photo's tabletop. Labels appear to float in the same space as
+     the photo itself, not inside a separate card. */
+  .photo-frame {
+    position: relative;
+    margin: 0 0 16px;
+    width: 100%;
+    display: block;
+  }
+  .photo-frame img {
+    width: 100%;
+    height: auto;
+    display: block;
+  }
+
+  /* ─── Annotations (Vibe DJ style, orange accent) ─ */
+  .annotation {
+    position: absolute;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    pointer-events: none;
+  }
+  .annotation.right-side {
+    flex-direction: row-reverse;
+  }
+  .annotation-label {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink);
+    background: var(--accent-coral);
+    padding: 5px 12px;
+    border-radius: 6px;
+    white-space: nowrap;
+    letter-spacing: 0.3px;
+    border: 1px solid rgba(240,107,50,0.25);
+  }
+  .annotation-line {
+    width: 64px;
+    height: 2px;
+    background: var(--ink);
+    flex-shrink: 0;
+  }
+  .annotation-line.short { width: 36px; }
+  .annotation-line.long  { width: 96px; }
+  .annotation-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--ink);
+    border: 2px solid var(--card);
+    box-shadow: 0 0 0 1px var(--ink);
+    flex-shrink: 0;
+  }
+
+  /* ─── Caption strip at the bottom ──────────────── */
+  .caption-strip {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent-orange);
+    border-radius: 10px;
+    padding: 16px 22px;
+    font-size: 16px;
+    color: var(--ink);
+    line-height: 1.55;
+  }
+  .caption-strip .caption-label {
+    font-weight: 700;
+    color: var(--ink);
+    margin-right: 8px;
+  }
+  .caption-strip .caption-sep {
+    color: rgba(0,0,0,0.2);
+    margin: 0 10px;
+    font-weight: 400;
+  }
+</style>
+</head>
+<body>
+
+  <div class="h-eyebrow">Hardware · in action</div>
+  <h1>The <em>thing</em> itself.</h1>
+
+  <!-- ─── Photo + annotations ───────────────────────── -->
+  <div class="photo-frame">
+    <img id="hw-photo" src="version2/design/WechatIMG901.jpg" alt="Anonymous Connection hardware on a breadboard, mid-test.">
+
+    <!-- Annotation 1: LCD screen — label on the left, line points right INTO the green panel.
+         The LCD center sits roughly at x=53%, y=63%. Label sits left of photo, dot lands on the screen.
+         Net position: +10% right and -10% top from the original baseline. -->
+    <div class="annotation" style="top: 52%; left: 25%;">
+      <div class="annotation-label">LCD screen</div>
+      <div class="annotation-line long"></div>
+      <div class="annotation-dot"></div>
+    </div>
+
+    <!-- Annotation 1b: ESP32-C6 — sits directly under the LCD label, pointing at
+         the small board behind the LCD screen (visible just below the green panel). -->
+    <div class="annotation" style="top: 62%; left: 25%;">
+      <div class="annotation-label">ESP32-C6</div>
+      <div class="annotation-line long"></div>
+      <div class="annotation-dot"></div>
+    </div>
+
+    <!-- Annotation 2: Button — the small 3-pin black module sits at roughly x=33%, y=62%.
+         Label far left, dot lands on the module itself.
+         Net position: +3% right from the original baseline. -->
+    <div class="annotation" style="top: 62%; left: 5%;">
+      <div class="annotation-label">Button</div>
+      <div class="annotation-line"></div>
+      <div class="annotation-dot"></div>
+    </div>
+
+    <!-- Annotation 3: NFC reader — the red PN532 module under the bear card,
+         centered around x=80%, y=33%. Label sits to the right of the photo.
+         Moved -5% top per Xinyi's request. -->
+    <div class="annotation right-side" style="top: 32%; right: 4%;">
+      <div class="annotation-label">NFC reader</div>
+      <div class="annotation-line long"></div>
+      <div class="annotation-dot"></div>
+    </div>
+
+    <!-- Annotation 4: NFC sticker — the bear card in hand, at roughly x=85%, y=15%.
+         Label outside top-right of photo. -->
+    <div class="annotation right-side" style="top: 12%; right: 4%;">
+      <div class="annotation-label">NFC sticker</div>
+      <div class="annotation-line"></div>
+      <div class="annotation-dot"></div>
+    </div>
+
+  </div>
+
+
+</body>
+</html>

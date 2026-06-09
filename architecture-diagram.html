@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Anonymous Connection — System Architecture</title>
+<style>
+  /* PPT mockup of the hardware + software architecture, styled in the
+     "white-background, soft-pastel highlight" style of the AI Workflow
+     reference image. 1600 × 1000 px canvas — drop straight into 16:9 PPT.
+     One screenshot = one slide. No images, no external assets. */
+  :root {
+    --bg:            #fbfaf7;
+    --card:          #ffffff;
+    --ink:           #1b1b1b;
+    --ink-soft:      #6b6b6b;
+    --line:          #e6e3dc;
+    --line-strong:   #d4d0c7;
+
+    --accent-orange: #f06b32;     /* the workflow ribbon orange */
+    --accent-coral:  #ffe2d4;
+    --tag-blue:      #d9eaff;
+    --tag-blue-ink:  #1f4d8a;
+    --tag-mint:      #d6efe1;
+    --tag-mint-ink:  #1f6b4a;
+    --tag-peach:     #ffe2d4;
+    --tag-peach-ink: #a8451a;
+    --tag-lilac:     #e6dcf5;
+    --tag-lilac-ink: #5b3a8a;
+    --tag-sand:      #f0e8d3;
+    --tag-sand-ink:  #7a6230;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); }
+  body {
+    font-family: "Inter", "Helvetica Neue", "Lato", -apple-system, system-ui, sans-serif;
+    color: var(--ink);
+    padding: 36px 70px 40px;
+    line-height: 1.4;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ─── Page header ───────────────────────────── */
+  .eyebrow {
+    color: var(--accent-orange);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    border-top: 2px solid var(--accent-orange);
+    padding-top: 10px;
+    display: inline-block;
+    margin-bottom: 18px;
+  }
+  .eyebrow-tag {
+    color: var(--ink-soft);
+    font-weight: 600;
+    margin-left: 10px;
+    letter-spacing: 0.08em;
+  }
+  .eyebrow-tag b {
+    color: var(--ink);
+    font-weight: 700;
+  }
+  .eyebrow-sep {
+    color: var(--line-strong);
+    margin: 0 8px;
+  }
+  h1 {
+    font-size: 48px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin-bottom: 32px;
+  }
+  h1 em {
+    font-style: italic;
+    color: var(--accent-orange);
+    font-weight: 700;
+  }
+  .subhead {
+    font-size: 16px;
+    color: var(--ink-soft);
+    max-width: 760px;
+    margin-bottom: 50px;
+  }
+
+  /* ─── Top row: Inputs ▸ Brain ▸ Outputs ───────────────────────── */
+  .row-top {
+    display: grid;
+    grid-template-columns: 1fr 90px 1fr 90px 1fr;
+    align-items: stretch;
+    margin-bottom: 56px;
+  }
+  .col {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 22px 22px 24px;
+    position: relative;
+  }
+  .col-label {
+    position: absolute;
+    top: -11px;
+    left: 22px;
+    background: var(--card);
+    padding: 0 10px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .col-label.input  { color: var(--tag-blue-ink); }
+  .col-label.brain  { color: var(--accent-orange); }
+  .col-label.output { color: var(--tag-mint-ink); }
+
+  .col h2 {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 16px;
+    color: var(--ink);
+  }
+
+  /* Stack of item lines inside a column */
+  .item {
+    display: flex;
+    gap: 12px;
+    padding: 10px 0;
+    border-top: 1px solid var(--line);
+    align-items: flex-start;
+  }
+  .item:first-of-type { border-top: none; padding-top: 4px; }
+  .item .icon {
+    flex: 0 0 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 18px;
+    background: var(--tag-blue);
+  }
+  .item .icon.mint   { background: var(--tag-mint); }
+  .item .icon.peach  { background: var(--tag-peach); }
+  .item .icon.lilac  { background: var(--tag-lilac); }
+  .item .icon.sand   { background: var(--tag-sand); }
+  .item .icon.coral  { background: var(--accent-coral); }
+  .item .body {
+    flex: 1;
+    font-size: 14.5px;
+    line-height: 1.5;
+  }
+  .item .body strong {
+    font-weight: 700;
+    color: var(--ink);
+    display: block;
+    margin-bottom: 2px;
+  }
+  .item .body span {
+    color: var(--ink-soft);
+  }
+
+  /* Output sub-groupings (Individual vs Collective) */
+  .output-group + .output-group {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px dashed var(--line);
+  }
+  .output-group-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--tag-mint-ink);
+    margin-bottom: 8px;
+  }
+
+  /* Arrows between columns */
+  .arrow {
+    align-self: center;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28px;
+    color: var(--accent-orange);
+    font-weight: 700;
+  }
+
+  /* The "brain" column gets a distinct highlight ring */
+  .col.brain {
+    background: linear-gradient(180deg, #fff7ef 0%, #ffffff 75%);
+    border-color: #ffd4b8;
+  }
+  .brain-badge {
+    background: var(--accent-orange);
+    color: white;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    border-radius: 4px;
+    padding: 3px 8px;
+    display: inline-block;
+    margin-bottom: 8px;
+  }
+
+  /* ─── Software layer table ───────────────────────────── */
+  .layers-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    margin-bottom: 12px;
+  }
+  .layers {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .layer-row {
+    display: grid;
+    grid-template-columns: 280px 1.0fr 1.9fr 0.45fr;
+    align-items: stretch;
+    border-top: 1px solid var(--line);
+  }
+  .layer-row:first-child { border-top: none; }
+  .layer-row > div {
+    padding: 22px 24px;
+  }
+  .layer-name {
+    background: var(--bg);
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .layer-num {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: white;
+    border: 1.5px solid var(--line-strong);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 16px;
+    color: var(--ink);
+    flex-shrink: 0;
+  }
+  .layer-row.l1 .layer-num { border-color: var(--tag-blue-ink); color: var(--tag-blue-ink); background: var(--tag-blue); }
+  .layer-row.l2 .layer-num { border-color: var(--tag-mint-ink); color: var(--tag-mint-ink); background: var(--tag-mint); }
+  .layer-row.l3 .layer-num { border-color: var(--tag-peach-ink); color: var(--tag-peach-ink); background: var(--tag-peach); }
+
+  .layer-name strong {
+    display: block;
+    font-size: 18px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    line-height: 1.25;
+  }
+  .layer-name span {
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    line-height: 1.4;
+  }
+  .layer-task {
+    border-left: 1px solid var(--line);
+    font-size: 15px;
+    color: var(--ink);
+    line-height: 1.6;
+  }
+  .layer-task strong {
+    font-weight: 700;
+    color: var(--ink);
+  }
+  .layer-task .stage-pill {
+    display: inline-block;
+    background: var(--tag-sand);
+    color: var(--tag-sand-ink);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-bottom: 8px;
+  }
+
+  .layer-sees {
+    border-left: 1px solid var(--line);
+    font-size: 13.5px;
+    color: var(--ink);
+    line-height: 1.5;
+  }
+  .layer-sees .task {
+    margin-bottom: 10px;
+    color: var(--ink);
+  }
+  .layer-sees .vars-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ink);
+    margin-bottom: 8px;
+    letter-spacing: 0.01em;
+  }
+  .layer-sees .vars-note {
+    font-size: 12px;
+    color: var(--ink-soft);
+    font-style: italic;
+    margin-top: 10px;
+    line-height: 1.45;
+  }
+  .layer-sees .vars-note code {
+    font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    background: var(--bg);
+    color: var(--ink);
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 600;
+  }
+  .layer-sees ul.vars {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .layer-sees ul.vars.two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    column-gap: 40px;
+    row-gap: 4px;
+  }
+  .layer-sees ul.vars.four-col {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    column-gap: 20px;
+    row-gap: 4px;
+  }
+  .layer-sees ul.vars.four-col li {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+    padding: 4px 0;
+  }
+  /* Horizontal flow with arrows: screen 1 → screen 2 → screen 3 */
+  .layer-sees ul.vars.flow {
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0;
+    flex-wrap: nowrap;
+  }
+  .layer-sees ul.vars.flow li {
+    flex: 1;
+    padding: 0;
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+    white-space: nowrap;
+  }
+  .layer-sees ul.vars.flow li + li {
+    padding-left: 28px;
+  }
+  .layer-sees ul.vars.flow li + li::before {
+    content: "→";
+    position: absolute;
+    left: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--accent-orange);
+    font-weight: 700;
+    font-size: 16px;
+  }
+  .layer-sees ul.vars.flow li .desc {
+    font-size: 12.5px;
+    color: var(--ink-soft);
+    line-height: 1.35;
+  }
+  .layer-sees ul.vars li {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 4px 0;
+    font-size: 13px;
+    color: var(--ink-soft);
+  }
+  .layer-sees ul.vars li code {
+    font-family: "SF Mono", "Menlo", "Monaco", monospace;
+    background: var(--bg);
+    color: var(--tag-peach-ink);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+  .layer-where {
+    border-left: 1px solid var(--line);
+    font-size: 13.5px;
+    color: var(--ink-soft);
+    line-height: 1.7;
+  }
+
+  /* Column header row for the layers table */
+  .layer-row.header {
+    background: var(--bg);
+    font-size: 11.5px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+  .layer-row.header > div {
+    padding: 12px 24px;
+  }
+  .layer-row.header .layer-task,
+  .layer-row.header .layer-sees,
+  .layer-row.header .layer-where {
+    border-left: 1px solid var(--line);
+  }
+
+  /* ─── Hardware BoM strip (top-of-page, after subhead) ─────────── */
+  .hw-strip {
+    margin: 0 0 44px;
+    padding: 16px 22px;
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent-orange);
+    border-radius: 10px;
+    color: var(--ink);
+    font-size: 16px;
+    font-weight: 500;
+    line-height: 1.5;
+  }
+  .hw-strip .hw-label {
+    font-weight: 700;
+    color: var(--ink);
+    margin-right: 6px;
+  }
+  .hw-strip .hw-sep {
+    color: var(--line-strong);
+    font-weight: 400;
+    margin: 0 10px;
+  }
+</style>
+</head>
+<body>
+
+  <h1>How <em>It's</em> Built</h1>
+
+  <!-- ─── Hardware BoM (per device) ─────────────────────────── -->
+  <div class="hw-strip">
+    <span class="hw-label">Hardware per device:</span>ESP32-C6 board<span class="hw-sep">·</span>1.3″ ST7789 LCD<span class="hw-sep">·</span>PN532 NFC reader<span class="hw-sep">·</span>button<span class="hw-sep">·</span>NFC sticker<span class="hw-sep">·</span>USB-C powerbank
+  </div>
+
+  <!-- ─── Top row: 3 columns ─────────────────────────────── -->
+  <div class="row-top">
+
+    <!-- Column 1: INPUTS -->
+    <div class="col">
+      <span class="col-label input">Inputs</span>
+      <h2>What the user touches</h2>
+
+      <div class="item">
+        <div class="icon mint">▤</div>
+        <div class="body">
+          <strong>LCD screen</strong>
+          <span>1.3″ on each device — shows the avatar, then the match animation</span>
+        </div>
+      </div>
+
+      <div class="item">
+        <div class="icon peach">⌖</div>
+        <div class="body">
+          <strong>NFC reader</strong>
+          <span>Inside each device — detects when another device is tapped against it</span>
+        </div>
+      </div>
+
+      <div class="item">
+        <div class="icon peach">◎</div>
+        <div class="body">
+          <strong>NFC sticker</strong>
+          <span>Glued on each device — read during a tap</span>
+        </div>
+      </div>
+
+      <div class="item">
+        <div class="icon lilac">◉</div>
+        <div class="body">
+          <strong>Button</strong>
+          <span>Advances the 3-screen match animation at the reader's pace</span>
+        </div>
+      </div>
+
+      <div class="item">
+        <div class="icon sand">📱</div>
+        <div class="body">
+          <strong>Phone with Wi-Fi</strong>
+          <span>Hotspot for every device, plus the avatar &amp; interest form</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">→</div>
+
+    <!-- Column 2: BRAIN -->
+    <div class="col brain">
+      <span class="col-label brain">Central Brain</span>
+      <h2>Flask server on a laptop</h2>
+
+      <div class="item">
+        <div class="icon coral">▦</div>
+        <div class="body">
+          <strong>Stores every profile</strong>
+          <span>Avatar, interests, sub-tags — one record per participant</span>
+        </div>
+      </div>
+
+      <div class="item">
+        <div class="icon coral">∑</div>
+        <div class="body">
+          <strong>Computes match scores</strong>
+          <span>Shared interests → percentage, common tags, icebreaker</span>
+        </div>
+      </div>
+
+      <div class="item">
+        <div class="icon coral">⚡</div>
+        <div class="body">
+          <strong>Pushes to every device</strong>
+          <span>Wi-Fi polling every 500 ms; live SSE stream to the wall</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="arrow">→</div>
+
+    <!-- Column 3: OUTPUTS -->
+    <div class="col">
+      <span class="col-label output">Outputs</span>
+      <h2>What the room sees</h2>
+
+      <div class="output-group">
+        <div class="output-group-label">Individual</div>
+        <div class="item">
+          <div class="icon mint">◐</div>
+          <div class="body">
+            <strong>My own avatar</strong>
+            <span>Shown on my own device — what I look like to others</span>
+          </div>
+        </div>
+        <div class="item">
+          <div class="icon peach">✦</div>
+          <div class="body">
+            <strong>Match screens &amp; topic</strong>
+            <span>When matched: 3-screen story unfolds on both devices in sync</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="output-group">
+        <div class="output-group-label">Collective</div>
+        <div class="item">
+          <div class="icon mint">▦</div>
+          <div class="body">
+            <strong>Wall projection (with distance)</strong>
+            <span>Live, continuously changing view of everyone in the room. The closer two avatars sit, the more interests they share.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Software layers ─────────────────────────────── -->
+  <div class="layers-title">Software architecture · three layers</div>
+  <div class="layers">
+
+    <!-- Column header row -->
+    <div class="layer-row header">
+      <div class="layer-name">What</div>
+      <div class="layer-task">Core task</div>
+      <div class="layer-sees">Data structure</div>
+      <div class="layer-where">Data flow</div>
+    </div>
+
+    <div class="layer-row l1">
+      <div class="layer-name">
+        <div class="layer-num">1</div>
+        <div>
+          <strong>Identity Layer</strong>
+          <span>Avatar</span>
+        </div>
+      </div>
+      <div class="layer-task">
+        Defines <strong>how each person looks</strong> on the device and on the wall. Each user builds their avatar on the phone when they first join — set once, seen everywhere afterwards.
+      </div>
+      <div class="layer-sees">
+        <div class="vars-title">Avatar definition · 4 fields</div>
+        <ul class="vars four-col">
+          <li><code>body</code><span class="chip-desc">body shape &amp; pose</span></li>
+          <li><code>nickname</code><span class="chip-desc">short anonymous handle</span></li>
+          <li><code>bubble</code><span class="chip-desc">speech-bubble quote (≤ 20 chars)</span></li>
+          <li><code>color</code><span class="chip-desc">palette index (5 tones)</span></li>
+        </ul>
+        <div class="vars-note">
+          ~270 visual combinations from <code>body</code> × <code>color</code> (5 tones × 6 shades) × <code>smile</code>; <code>bubble</code> + <code>nickname</code> are free text on top — effectively unique per person.
+        </div>
+      </div>
+      <div class="layer-where">
+        Phone form<br>→ Server<br>→ Each device + Wall
+      </div>
+    </div>
+
+    <div class="layer-row l2">
+      <div class="layer-name">
+        <div class="layer-num">2</div>
+        <div>
+          <strong>Connection Layer</strong>
+          <span>Data collection &amp; pairing</span>
+        </div>
+      </div>
+      <div class="layer-task">
+        <strong>Collects each user's interest tags</strong> through a short questionnaire — right after the avatar in the setting stage. The server stores this data, then later uses it to pair people anonymously by similarity.
+      </div>
+      <div class="layer-sees">
+        <div class="vars-title">Interest tags · two-layer model</div>
+        <ul class="vars two-col">
+          <li><code>category</code> e.g. <em>movie, music, sport</em></li>
+          <li><code>subcategory</code> e.g. <em>movie → sci-fi, drama</em></li>
+        </ul>
+        <div class="vars-note">
+          Score = <code>shared categories × 33%</code> → maps to 0%, 33%, 67%, 100%. Subcategories sharpen the common-interest list but don't change the score.
+        </div>
+      </div>
+      <div class="layer-where">
+        Questionnaire<br>→ Server (stores)<br>→ Wall layout by similarity
+      </div>
+    </div>
+
+    <div class="layer-row l3">
+      <div class="layer-name">
+        <div class="layer-num">3</div>
+        <div>
+          <strong>Trigger Layer</strong>
+          <span>Tap → similarity → icebreaker</span>
+        </div>
+      </div>
+      <div class="layer-task">
+        <strong>When two devices tap</strong>, the server compares their interest arrays, picks the common ones, and returns a topic prompt — the icebreaker.
+      </div>
+      <div class="layer-sees">
+        <div class="vars-title">Match animation · 3 screens in sync</div>
+        <ul class="vars flow">
+          <li><code>screen 1</code><span class="desc">similarity % (e.g. <em>67%</em>)</span></li>
+          <li><code>screen 2</code><span class="desc">common interests</span></li>
+          <li><code>screen 3</code><span class="desc">topic prompt (icebreaker)</span></li>
+        </ul>
+        <div class="vars-note">
+          Triggered by <code>tap</code>, paced by <code>button</code> — the reader presses to move from one screen to the next.
+        </div>
+      </div>
+      <div class="layer-where">
+        Two devices tap<br>→ Server compares arrays<br>→ Both LCDs in sync
+      </div>
+    </div>
+  </div>
+
+
+</body>
+</html>
