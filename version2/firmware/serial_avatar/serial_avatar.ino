@@ -48,6 +48,13 @@
 // Wi-Fi join timeout in setup(). After this we proceed and show an error
 // on screen so the demo isn't bricked by a temporarily-flaky hotspot.
 #define WIFI_JOIN_TIMEOUT_MS  15000
+// If SERVER_HOST is stale, scan the current /24 for the Flask health probe.
+// This is the hotspot-day fix: the board no longer depends on the Mac getting
+// the exact same 172.20.10.x address every time.
+#define SERVER_DISCOVERY_RETRY_MS  10000
+#define HEALTH_PROBE_TIMEOUT_MS    180
+#define HELLO_HTTP_TIMEOUT_MS      1200
+#define POLL_HTTP_TIMEOUT_MS       3000
 
 
 // ---- Types -----------------------------------------------------------------
@@ -194,10 +201,19 @@ uint32_t btnLastChangeMs = 0;      // millis() when btnLastReading last flipped
 // POLL_INTERVAL_MS regardless of how fast loop() spins.
 bool     wifiReady    = false;
 uint32_t pollLastMs   = 0;
+// Runtime server address. SERVER_HOST from secrets.h is now only the first
+// candidate; if it fails, discovery rewrites this to the Mac's current IP.
+char     serverHost[48] = SERVER_HOST;
+uint32_t lastDiscoveryMs = 0;
+uint8_t  pollFailCount   = 0;
 // True once /api/device/hello has succeeded at least once. We don't poll
 // until the server has acknowledged this sticker — otherwise our first
 // poll would 404 and burn time on retry storms.
 bool     helloDone    = false;
+// Single global HTTPClient reused across hello/poll/tap/discovery calls.
+// Rebuilding the client every loop iteration was triggering heap
+// fragmentation in earlier versions.
+HTTPClient httpClient;
 
 
 // ---- Palette (mirror of web/colors.json palette[mood][energy]) -------------
@@ -541,7 +557,7 @@ size_t countCells(const char* s) {
 void buildScanUrl(char* out, size_t cap) {
   snprintf(out, cap,
            "http://%s:%d/?sticker=%d",
-           SERVER_HOST, SERVER_PORT, ME_STICKER);
+           serverHost, SERVER_PORT, ME_STICKER);
 }
 
 // ESP-IDF's qrcode API is callback-driven: esp_qrcode_generate() encodes the
@@ -619,6 +635,18 @@ void renderWaiting() {
     drawString(20, 100, "connecting wifi...", FG, RGB565_BLACK);
     drainSerialIntoBuf();
     drawString(20, 124, WIFI_SSID,            FG, RGB565_BLACK);
+    drainSerialIntoBuf();
+    return;
+  }
+
+  if (!helloDone) {
+    drawString(20, 92, "finding server...", FG, RGB565_BLACK);
+    drainSerialIntoBuf();
+    char ipLine[40];
+    snprintf(ipLine, sizeof(ipLine), "board ip %u.%u.%u.%u",
+             WiFi.localIP()[0], WiFi.localIP()[1],
+             WiFi.localIP()[2], WiFi.localIP()[3]);
+    drawString(20, 116, ipLine, FG, RGB565_BLACK);
     drainSerialIntoBuf();
     return;
   }
@@ -1337,6 +1365,56 @@ bool connectWiFi() {
   return true;
 }
 
+void setServerHost(const char* host) {
+  snprintf(serverHost, sizeof(serverHost), "%s", host);
+}
+
+bool probeServerHost(const char* host) {
+  char url[96];
+  snprintf(url, sizeof(url),
+           "http://%s:%d/api/device/health",
+           host, SERVER_PORT);
+  httpClient.begin(url);
+  httpClient.setTimeout(HEALTH_PROBE_TIMEOUT_MS);
+  int code = httpClient.GET();
+  String body = (code == 200) ? httpClient.getString() : "";
+  httpClient.end();
+  return code == 200 && body.indexOf("anonymous-connection") >= 0;
+}
+
+bool discoverServerHost() {
+  uint32_t now = millis();
+  if (lastDiscoveryMs != 0 && now - lastDiscoveryMs < SERVER_DISCOVERY_RETRY_MS) {
+    return false;
+  }
+  lastDiscoveryMs = now;
+
+  IPAddress local = WiFi.localIP();
+  if (local[0] == 0) return false;
+
+  Serial.printf("[serial_avatar] discovery: scanning %u.%u.%u.1-254 on port %d\n",
+                local[0], local[1], local[2], SERVER_PORT);
+
+  char candidate[48];
+  for (uint16_t host = 1; host <= 254; host++) {
+    if (host == local[3]) continue;
+    snprintf(candidate, sizeof(candidate), "%u.%u.%u.%u",
+             local[0], local[1], local[2], host);
+    if (probeServerHost(candidate)) {
+      setServerHost(candidate);
+      Serial.printf("[serial_avatar] discovery: server found at %s\n", serverHost);
+      return true;
+    }
+    if (host % 32 == 0) {
+      delay(1);
+      drainSerialIntoBuf();
+    }
+  }
+
+  Serial.println("[serial_avatar] discovery: server not found");
+  return false;
+}
+
 // Apply a profile JSON object (as received from /api/device/poll's events
 // array) to the global avatar state. Mirrors the avatar fields handleLine
 // reads, minus the type detection — we know it's a profile because the
@@ -1387,14 +1465,6 @@ void dispatchMatchEvent(JsonObject ev) {
 // Pulls the events array and dispatches each entry by type. Anything we
 // don't recognize is logged + skipped — server-newer-than-firmware is a
 // real scenario during dev.
-// Single global HTTPClient reused across hello/poll/tap calls. Rebuilding
-// the client every loop iteration was triggering heap fragmentation —
-// `assert failed: block_locate_free heap_tlsf.c:476` — once we'd been
-// running for a few seconds. The TLSF allocator can't find a contiguous
-// block large enough for HTTPClient's internal buffers after repeated
-// alloc/free churn. Reusing a single instance keeps total live heap stable.
-HTTPClient httpClient;
-
 // Heap-friendly JSON buffer for poll responses. Old code used a stack-
 // allocated StaticJsonDocument<8192>; switching to a stream-parsed
 // DynamicJsonDocument with realistic size avoids two issues at once:
@@ -1408,9 +1478,9 @@ void pollServer() {
   char url[96];
   snprintf(url, sizeof(url),
            "http://%s:%d/api/device/poll?sticker=%d",
-           SERVER_HOST, SERVER_PORT, ME_STICKER);
+           serverHost, SERVER_PORT, ME_STICKER);
   httpClient.begin(url);
-  httpClient.setTimeout(3000);
+  httpClient.setTimeout(POLL_HTTP_TIMEOUT_MS);
   int code = httpClient.GET();
   if (code != 200) {
     if (code != HTTPC_ERROR_CONNECTION_REFUSED && code != -1) {
@@ -1418,8 +1488,16 @@ void pollServer() {
       Serial.printf("[serial_avatar] poll HTTP %d\n", code);
     }
     httpClient.end();
+    pollFailCount++;
+    if (pollFailCount >= 4) {
+      Serial.println("[serial_avatar] poll failed repeatedly; rediscovering server");
+      helloDone = false;
+      pollFailCount = 0;
+      if (matchState == MATCH_IDLE && !st.valid) renderWaiting();
+    }
     return;
   }
+  pollFailCount = 0;
   // Materialize the whole body first, then parse. Streaming directly from
   // getStream() into deserializeJson() has been observed to wedge when
   // chunked encoding + heap pressure interact badly. getString() is one
@@ -1456,19 +1534,24 @@ bool sendHello() {
   char url[96];
   snprintf(url, sizeof(url),
            "http://%s:%d/api/device/hello",
-           SERVER_HOST, SERVER_PORT);
+           serverHost, SERVER_PORT);
   httpClient.begin(url);
   httpClient.addHeader("Content-Type", "application/json");
-  httpClient.setTimeout(3000);
+  httpClient.setTimeout(HELLO_HTTP_TIMEOUT_MS);
   char body[48];
   snprintf(body, sizeof(body), "{\"sticker\":%d}", ME_STICKER);
   int code = httpClient.POST(body);
   httpClient.end();
   if (code == 200) {
-    Serial.printf("[serial_avatar] hello ok (sticker=%d)\n", ME_STICKER);
+    Serial.printf("[serial_avatar] hello ok (sticker=%d, server=%s)\n",
+                  ME_STICKER, serverHost);
+    pollFailCount = 0;
     return true;
   }
-  Serial.printf("[serial_avatar] hello failed: HTTP %d\n", code);
+  Serial.printf("[serial_avatar] hello failed: HTTP %d at %s\n", code, serverHost);
+  if (discoverServerHost()) {
+    return sendHello();
+  }
   return false;
 }
 
@@ -1479,10 +1562,10 @@ void sendTap(const char* peerUid) {
   char url[96];
   snprintf(url, sizeof(url),
            "http://%s:%d/api/device/tap",
-           SERVER_HOST, SERVER_PORT);
+           serverHost, SERVER_PORT);
   httpClient.begin(url);
   httpClient.addHeader("Content-Type", "application/json");
-  httpClient.setTimeout(3000);
+  httpClient.setTimeout(POLL_HTTP_TIMEOUT_MS);
   char body[96];
   snprintf(body, sizeof(body),
            "{\"me_sticker\":%d,\"peer_uid\":\"%s\"}",
@@ -1643,6 +1726,7 @@ void loop() {
     }
   } else if (!wifiReady) {
     wifiReady = true;
+    lastDiscoveryMs = 0;
     Serial.print("[serial_avatar] wifi reconnected, ip=");
     Serial.println(WiFi.localIP());
     if (matchState == MATCH_IDLE && !st.valid) renderWaiting();
@@ -1653,7 +1737,10 @@ void loop() {
   uint32_t now = millis();
   if (wifiReady && !helloDone && (now - pollLastMs >= POLL_INTERVAL_MS)) {
     pollLastMs = now;
-    helloDone = sendHello();
+    if (sendHello()) {
+      helloDone = true;
+      if (matchState == MATCH_IDLE && !st.valid) renderWaiting();
+    }
   }
 
   // Server poll — drains profile updates and match events. Same cadence

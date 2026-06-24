@@ -15,6 +15,8 @@ The script prints a LAN URL + an ASCII QR code so phones on the same
 WiFi can join in two seconds.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import socket
@@ -295,6 +297,19 @@ def stage3():
 @app.route("/api/users")
 def api_users():
     return jsonify(load_users())
+
+@app.route("/api/device/health")
+def api_device_health():
+    """Tiny discovery probe for ESP32 boards.
+
+    The firmware uses this endpoint after joining the hotspot to find the
+    laptop even when DHCP gives the Mac a different IP than last time.
+    """
+    return jsonify({
+        "ok": True,
+        "app": "anonymous-connection",
+        "port": PORT,
+    })
 
 @app.route("/api/qr")
 def api_qr():

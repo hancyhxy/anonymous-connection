@@ -6,7 +6,7 @@
 #define WIFI_SSID    "your-hotspot-name"
 #define WIFI_PASS    "your-hotspot-password"
 
-#define SERVER_HOST  "192.168.x.x"      // LAN IP of laptop running server.py
+#define SERVER_HOST  "192.168.x.x"      // Fallback only; firmware auto-discovers server.py
 #define SERVER_PORT  8000
 
 // 1 for station A, 2 for station B. Flash each board with its own number.

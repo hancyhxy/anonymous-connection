@@ -13,15 +13,16 @@
 Captured here so you don't have to re-brief mid-demo:
 
 - The project is `anonymous-connection`, located at
-  `/Users/qiansui/Desktop/xinyihan/anonymous-connection/`.
+  `/Users/han/Desktop/xinyihan/anonymous-connection/`.
 - There is **exactly one Flask server** — `version2/web/server.py`. It serves
   three surfaces from one process on **port 8000**:
   - `/` — stage 1 form on phones (`?sticker=N` binds to physical board N)
   - `/collective` — wall view on the projector
   - `/api/device/*` — Wi-Fi polling endpoint for ESP32 boards
 - There are 5 physical boards (sticker 1..5). Each is battery-powered,
-  joins iPhone hotspot `Hannn`, and polls the server every 500 ms over
-  Wi-Fi for new profile / match events. **Board A is the only one
+  joins iPhone hotspot `Hannn`, auto-discovers the Mac's Flask server,
+  and polls every 500 ms over Wi-Fi for new profile / match events.
+  **Board A is the only one
   confirmed working** as of demo morning.
 - `mock_seed.py` can inject 25 synthetic profiles into the wall.
   Profiles 1–5 carry sticker numbers and overlay `STAGE3_USERS[1..5]`;
@@ -128,7 +129,8 @@ Pick one of these one-liners and the assistant runs the full sequence:
 I cannot do these — you do them physically:
 
 - Turn on iPhone hotspot `Hannn`; connect Mac to it
-- Verify Mac got IP `172.20.10.12` (`ifconfig en0 | grep "inet "`)
+- Turn on iPhone hotspot **Maximize Compatibility**
+- Verify Mac got a hotspot IP like `172.20.10.x` (`ifconfig en0 | grep "inet "`)
 - Power the physical boards
 - Plug Mac into projector, open the wall URL fullscreen
 - Place / hide paper QRs depending on which branch
@@ -143,11 +145,11 @@ Three end-to-end checks. Don't skip them.
 ### Check 1 — server reachable on LAN IP
 
 ```bash
-curl -s http://172.20.10.12:8000/api/users | head -c 80
+curl -s http://<Mac hotspot IP>:8000/api/users | head -c 80
 ```
 
-If this fails with timeout: your Mac is on a different IP than the
-boards expect. See `Launch Runbook.md` → Troubleshooting → wrong IP.
+If this fails with timeout: your phone is probably not on the same hotspot,
+or the server is not running.
 
 ### Check 2 — wall renders the seeded tiles
 
@@ -163,7 +165,7 @@ branch). Should see:
 
 (Skip in pure mock branch.) On your phone:
 
-1. Open `http://172.20.10.12:8000/?sticker=1`
+1. Scan board #1 QR, or open `http://<Mac hotspot IP>:8000/?sticker=1`
 2. Fill the form (nickname `test`, pick any interest, pick any avatar)
 3. Hit submit
 
@@ -190,9 +192,9 @@ linger:
 |---|---|
 | Real-mode wall | `http://localhost:8000/collective` |
 | Mock-mode wall | `http://localhost:8000/collective?mock=1` |
-| Stage-1 (test from your phone) | `http://172.20.10.12:8000/?sticker=1` |
-| Sticker-N form for board N | `http://172.20.10.12:8000/?sticker=N` (PRIVATE — see Section 3) |
-| Wall join QR (mock mode only) | `http://172.20.10.12:8000/` (no sticker param — what the QR encodes) |
+| Stage-1 (test from your phone) | Scan board #1 QR, or use `http://<Mac hotspot IP>:8000/?sticker=1` |
+| Sticker-N form for board N | Scan board N QR, or use `http://<Mac hotspot IP>:8000/?sticker=N` (PRIVATE — see Section 3) |
+| Wall join QR (mock mode only) | `http://<Mac hotspot IP>:8000/` (no sticker param — what the QR encodes) |
 
 ---
 
@@ -207,6 +209,6 @@ their requests harmlessly. Unplug them when convenient.
 
 If you want to preserve the audience submissions:
 ```bash
-cd /Users/qiansui/Desktop/xinyihan/anonymous-connection/version2/web
+cd /Users/han/Desktop/xinyihan/anonymous-connection/version2/web
 cp users.json users-demo-$(date +%Y%m%d).json
 ```

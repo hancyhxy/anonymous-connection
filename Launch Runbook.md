@@ -27,17 +27,18 @@ All three share one Flask server running on your Mac.
 ```
    iPhone hotspot "Hannn"  (subnet 172.20.10.x)
             │
-            ├── your Mac        — gets 172.20.10.12, runs Flask :8000
-            ├── ESP32 sticker A — hard-coded SERVER_HOST=172.20.10.12
+            ├── your Mac        — gets a 172.20.10.x address, runs Flask :8000
+            ├── ESP32 sticker A — auto-discovers the Flask server on Wi-Fi
             ├── ESP32 sticker B — (only if burned)
             └── audience phones — scan QR → load Stage 1 form
 ```
 
-**Single point of failure**: if your Mac doesn't land on `172.20.10.12`
-when it joins the hotspot, the boards can't reach the server.
-`secrets_shared.h` line 14 hard-codes that IP. iOS hotspot DHCP usually
-hands out the same IP twice in a row, but not always — verify before
-relying on it.
+**What is fixed now**: the boards no longer depend on your Mac keeping
+the same `172.20.10.x` address. They try the old configured address first,
+then scan the hotspot network for the Flask server.
+
+**What still matters**: keep the demo small. iPhone hotspot is fine for
+Mac + 2 boards + 1 scanning phone, but avoid piling on extra devices.
 
 ---
 
@@ -48,6 +49,7 @@ relying on it.
 - [ ] iPhone hotspot SSID is still `Hannn` and password is still `hancyhxy`
       (matches `secrets_shared.h` line 11–12). If you renamed them — re-burn
       every board with updated secrets.
+- [ ] iPhone Personal Hotspot → **Maximize Compatibility**: ON.
 - [ ] All five stickers (1–5) are physically labelled and you can tell them
       apart at a glance.
 - [ ] Board A boots cleanly. (Open Serial Monitor @ 115200 → see
@@ -55,7 +57,7 @@ relying on it.
 - [ ] Your Mac has Chrome installed and signed-in (so you don't get a
       "first-run" wizard mid-demo).
 - [ ] Stage 1 form on phone tested end-to-end:
-      `http://172.20.10.12:8000/?sticker=1` → fill → submit → board A
+      scan board A's QR → fill → submit → board A
       LCD updates within 2s + tile appears on wall.
 
 ### Cable + power inventory
@@ -77,17 +79,18 @@ relying on it.
 ### Step 1 — Network up
 
 1. iPhone → Settings → Personal Hotspot → **Allow Others to Join**: ON
-2. iPhone hotspot stays open. **Do not lock the iPhone screen during the
+2. iPhone → Personal Hotspot → **Maximize Compatibility**: ON.
+3. iPhone hotspot stays open. **Do not lock the iPhone screen during the
    demo** — iOS sometimes drops the hotspot when the screen sleeps.
-3. Mac → click WiFi menu → connect to `Hannn`.
-4. **Verify**: open Terminal, run `ifconfig en0 | grep "inet "` →
-   expect `inet 172.20.10.12`. If you got a different IP (172.20.10.3,
-   172.20.10.5, etc.), see **Troubleshooting → wrong IP** below.
+4. Mac → click WiFi menu → connect to `Hannn`.
+5. **Verify**: open Terminal, run `ifconfig en0 | grep "inet "` →
+   expect an address like `inet 172.20.10.x`. The exact last number no
+   longer has to be `.12`.
 
 ### Step 2 — Server up
 
 ```bash
-cd /Users/qiansui/Desktop/xinyihan/anonymous-connection/version2/web
+cd /Users/han/Desktop/xinyihan/anonymous-connection/version2/web
 ./start.sh
 ```
 
@@ -95,7 +98,7 @@ What you'll see in Terminal:
 ```
 [start] checking dependencies
 [start] launching server — Ctrl+C to stop
-[server]  stage 1 (phone): http://172.20.10.12:8000/
+[server]  stage 1 (phone): http://<your Mac hotspot IP>:8000/
 [server]  collective wall: http://localhost:8000/collective
 [server]  stage 3 (tap)  : http://localhost:8000/stage3
 ```
@@ -166,7 +169,7 @@ shows the count + hint.
 Audience flow:
 - They walk up, see the wall + sticker board.
 - They pick up a sticker, scan its QR with their phone.
-- Phone loads `http://172.20.10.12:8000/?sticker=N`.
+- Phone loads the current hotspot URL for `?sticker=N`.
 - They fill the two-step form → submit.
 - Their tile slides into the wall + that sticker's LCD updates.
 - They tap their sticker against someone else's → match animation
@@ -187,14 +190,16 @@ Check the URL bar:
 
 - Phone connected to a different Wi-Fi (not the hotspot)? Phone Settings → Wi-Fi → join `Hannn`.
 - Phone disconnected because iPhone locked. Wake iPhone, reconnect phone.
-- Your Mac's IP ≠ `172.20.10.12` → see "wrong IP" below.
+- Check the Stage 1 URL printed by `server.py`; the phone must load that
+  current hotspot URL.
 
 ### Board's LCD shows the loading screen forever
 
 The board hasn't successfully helloed the server. Three causes:
 - **Wi-Fi**: SSID or password mismatch. Check `secrets_shared.h`.
-- **IP**: Mac landed on a different LAN IP. Re-burn board with new IP
-  OR reset the iPhone hotspot until it hands out `172.20.10.12` again.
+- **Server discovery**: Mac is not on the hotspot, server is not running,
+  or the board is still scanning. Wait up to ~45s after boot, then check
+  Serial Monitor.
 - **Power**: USB cable doesn't deliver enough current. Try a different
   cable + a wall adapter (not a low-power port on your Mac).
 
@@ -203,21 +208,19 @@ cycle the board. You should see:
 ```
 [wifi] connecting to Hannn ...
 [wifi] connected, ip=172.20.10.X
-[http] hello to 172.20.10.12:8000 ...
-device hello OK
+[serial_avatar] hello failed: HTTP -1 at 172.20.10.12
+[serial_avatar] discovery: server found at 172.20.10.X
+[serial_avatar] hello ok (sticker=1, server=172.20.10.X)
 ```
 If it stops at `[wifi] connecting`, password is wrong.
-If it stops at `[http] hello`, IP mismatch.
+If it stays at `finding server...`, make sure `./start.sh` is running
+and the Mac is connected to the same hotspot.
 
-### Wrong IP — Mac got 172.20.10.5 instead of 172.20.10.12
+### Mac IP changed from last time
 
-Two paths:
-1. **Quick fix** — turn iPhone hotspot OFF, wait 10s, turn ON. Mac
-   re-DHCPs, often gets `.12` again.
-2. **Real fix** — give up on the hard-coded IP. Edit `secrets_shared.h`
-   line 14 → set `SERVER_HOST` to whatever IP your Mac actually got →
-   re-burn all boards. **Don't do this on demo morning.** Do it tonight
-   if you want belt-and-suspenders.
+This is OK now. The board uses `SERVER_HOST` only as the first try, then
+auto-discovers the server on the hotspot. No re-burn needed just because
+the Mac got `.5` instead of `.12`.
 
 ### Tap doesn't trigger match animation
 
@@ -264,7 +267,7 @@ visual to recover:
 | Wipe wall | `curl -X POST http://127.0.0.1:8000/admin/clear` |
 | Seed 25 mocks | `.venv/bin/python3 mock_seed.py 25` |
 | Wall URL | `http://localhost:8000/collective` |
-| Phone stage 1 | `http://172.20.10.12:8000/?sticker=N` |
+| Phone stage 1 | Scan the board QR, or use the Stage 1 URL printed by `server.py` |
 | Stop server | Ctrl+C |
 | Check Mac IP | `ifconfig en0 \| grep "inet "` |
 | Check board log | Arduino IDE → Serial Monitor → 115200 baud |

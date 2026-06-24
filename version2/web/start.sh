@@ -17,6 +17,11 @@ set -e
 
 cd "$(dirname "$0")"
 
+if [ -d ".venv" ] && ! ./.venv/bin/python3 -c 'import sys' >/dev/null 2>&1; then
+  echo "[start] existing .venv is broken or from another Python → recreating"
+  rm -rf .venv
+fi
+
 if [ ! -d ".venv" ]; then
   echo "[start] first run — creating .venv (one-time, ~30s)"
   python3 -m venv .venv
